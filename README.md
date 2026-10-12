@@ -16,7 +16,7 @@ The backend is on Render's free tier and sleeps when idle, so the first request 
 > - **Implemented and tested:** the full analysis pipeline, the API, CSV and PDF exports, the dashboard, and the map. 89 backend tests and 32 frontend tests pass.
 > - **Verified locally:** the backend and frontend dev servers, run against the live Open-Meteo API.
 > - **Not yet verified:** the Docker Compose stack. Docker Desktop's Linux engine could not start on the development machine because WSL has no distributions installed. The Compose file validates with `docker compose config`, but the containers were not built or run.
-> - **Deployed and verified live (12 October 2026):** frontend on Vercel, backend on Render, using the in-memory cache (no MongoDB Atlas connected yet). Live checks passed for CORS from the Vercel origin, a Hyderabad 1990-2025 analysis, the CSV download, and the PDF download.
+> - **Deployed and verified live (12 October 2026):** frontend on Vercel, backend on Render, cache on MongoDB Atlas (free M0). Live checks passed for CORS from the Vercel origin, a Hyderabad 1990-2025 analysis, the CSV download, and the PDF download. `/api/health` reports `"mode": "mongodb"`, and a repeated Delhi 2000-2024 analysis went from a cache miss (3.9 s) to a MongoDB cache hit (1.1 s).
 
 ---
 
@@ -384,7 +384,7 @@ What the frontend tests cover:
 
 ## Deployment
 
-The live demo was deployed with the steps below. MongoDB Atlas (step 1) is optional and not yet connected.
+The live demo was deployed with the steps below, including MongoDB Atlas.
 
 ### 1. MongoDB Atlas (free M0 cluster)
 
@@ -439,7 +439,7 @@ The brief asks that it not be published, so `*.pdf` is in `.gitignore`.
 - Repair Docker Desktop (Troubleshoot, then Reset), or run `wsl --install` and reboot.
 - Then run `docker compose up --build`.
 
-Because of this, the MongoDB code path has only been tested against `mongomock`, not a real server.
+The MongoDB code path is covered by `mongomock` tests and has been verified against a real MongoDB Atlas cluster in the live deployment, but not against the Compose `mongo:7` container.
 
 **Data**
 - Reanalysis data is not station data.
