@@ -1,0 +1,30 @@
+# Render Blueprint for the FastAPI backend.
+# Secrets (MONGODB_URI) and the deployed frontend origin are entered in the Render dashboard.
+services:
+  - type: web
+    name: climate-lens-api
+    runtime: docker
+    rootDir: backend
+    dockerfilePath: ./Dockerfile
+    plan: free
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: MONGODB_URI
+        sync: false
+      - key: MONGODB_DATABASE
+        value: climate_lens
+      - key: ALLOWED_ORIGINS
+        sync: false
+      - key: TRUST_PROXY_HEADERS
+        value: "true"
+      - key: OBSERVATION_CACHE_TTL_HOURS
+        value: "720"
+      - key: ANALYSIS_CACHE_TTL_HOURS
+        value: "168"
+      - key: RATE_LIMIT_ANALYZE_PER_MINUTE
+        value: "30"
+      - key: RATE_LIMIT_EXPORT_PER_MINUTE
+        value: "10"

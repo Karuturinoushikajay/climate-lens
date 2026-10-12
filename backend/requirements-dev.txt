@@ -1,0 +1,5 @@
+-r requirements.txt
+pytest>=8.3
+respx>=0.21
+pypdf>=5.0
+mongomock>=4.2

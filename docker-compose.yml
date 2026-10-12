@@ -1,0 +1,46 @@
+# Local stack: React (nginx) + FastAPI + MongoDB.
+# Host ports default to 5173 / 8000; override with FRONTEND_PORT / BACKEND_PORT if they are taken.
+services:
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    depends_on:
+      mongo:
+        condition: service_healthy
+    environment:
+      ENVIRONMENT: development
+      MONGODB_URI: mongodb://mongo:27017
+      MONGODB_DATABASE: climate_lens
+      ALLOWED_ORIGINS: http://localhost:${FRONTEND_PORT:-5173}
+      OBSERVATION_CACHE_TTL_HOURS: ${OBSERVATION_CACHE_TTL_HOURS:-720}
+      ANALYSIS_CACHE_TTL_HOURS: ${ANALYSIS_CACHE_TTL_HOURS:-168}
+      RATE_LIMIT_ANALYZE_PER_MINUTE: ${RATE_LIMIT_ANALYZE_PER_MINUTE:-30}
+      RATE_LIMIT_EXPORT_PER_MINUTE: ${RATE_LIMIT_EXPORT_PER_MINUTE:-10}
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_API_BASE_URL: http://localhost:${BACKEND_PORT:-8000}
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "${FRONTEND_PORT:-5173}:80"
+
+volumes:
+  mongo-data:
