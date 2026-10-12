@@ -4,8 +4,11 @@ services:
   - type: web
     name: climate-lens-api
     runtime: docker
-    rootDir: backend
-    dockerfilePath: ./Dockerfile
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    buildFilter:
+      paths:
+        - backend/**
     plan: free
     healthCheckPath: /api/health
     autoDeploy: true
