@@ -25,7 +25,10 @@ services:
         value: https://climate-lens(-[a-z0-9]+)?-karuturinoushikajays-projects\.vercel\.app
       - key: TRUST_PROXY_HEADERS
         value: "true"
-      # Cloudflare -> Render edge -> Render load balancer; the client IP is 3rd from the right.
+      # Every *.onrender.com request passes Cloudflare, which overwrites this header with the client IP.
+      - key: CLIENT_IP_HEADER
+        value: cf-connecting-ip
+      # Fallback only when the header above is missing.
       - key: TRUSTED_PROXY_HOPS
         value: "3"
       - key: OBSERVATION_CACHE_TTL_HOURS

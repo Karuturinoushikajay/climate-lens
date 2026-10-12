@@ -7,6 +7,7 @@ process-local store is used.
 
 from __future__ import annotations
 
+import ipaddress
 import logging
 import math
 import threading
@@ -117,15 +118,40 @@ class MongoHitStore:
         return bool(doc.get("ok")), len(hits), min(hits) if hits else now
 
 
+def normalise_ip(value: str) -> str | None:
+    """Canonical client key: the IPv4 address, or the /64 network for IPv6 (clients rotate
+    temporary addresses inside their /64). None if ``value`` is not an IP address."""
+    try:
+        addr = ipaddress.ip_address(value.strip())
+    except ValueError:
+        return None
+    if addr.version == 6:
+        if addr.ipv4_mapped:
+            return str(addr.ipv4_mapped)
+        return str(ipaddress.ip_network(f"{addr}/64", strict=False))
+    return str(addr)
+
+
 class RateLimiter:
-    """``trusted_proxy_hops`` is the number of proxies in front of the app that append to
-    X-Forwarded-For. The client is the entry that many positions from the right; anything to
-    its left was supplied by the client and is ignored. 0 uses the TCP peer address.
+    """Identifies the client in this order:
+
+    1. ``client_ip_header`` (e.g. ``cf-connecting-ip``): a header set by the edge proxy itself,
+       which overwrites any value the client sends. Only safe when every request passes that proxy.
+    2. ``trusted_proxy_hops``: the X-Forwarded-For entry that many positions from the right;
+       entries to its left were supplied by the client and are ignored.
+    3. The TCP peer address.
     """
 
-    def __init__(self, window_seconds: float = 60.0, trusted_proxy_hops: int = 0, store: HitStore | None = None):
+    def __init__(
+        self,
+        window_seconds: float = 60.0,
+        trusted_proxy_hops: int = 0,
+        store: HitStore | None = None,
+        client_ip_header: str = "",
+    ):
         self.window = window_seconds
         self.trusted_proxy_hops = max(0, trusted_proxy_hops)
+        self.client_ip_header = client_ip_header.strip().lower()
         self.store: HitStore = store or MemoryHitStore()
 
     @property
@@ -133,13 +159,18 @@ class RateLimiter:
         return self.store.scope
 
     def client_id(self, request: Request) -> str:
+        if self.client_ip_header:
+            ip = normalise_ip(request.headers.get(self.client_ip_header, ""))
+            if ip:
+                return ip
+        if self.trusted_proxy_hops:
+            hops = [h.strip() for h in request.headers.get("x-forwarded-for", "").split(",") if h.strip()]
+            if len(hops) >= self.trusted_proxy_hops:
+                ip = normalise_ip(hops[-self.trusted_proxy_hops])
+                if ip:
+                    return ip
         peer = request.client.host if request.client else "unknown"
-        if self.trusted_proxy_hops == 0:
-            return peer
-        hops = [h.strip() for h in request.headers.get("x-forwarded-for", "").split(",") if h.strip()]
-        if len(hops) < self.trusted_proxy_hops:
-            return peer
-        return hops[-self.trusted_proxy_hops][:64]
+        return normalise_ip(peer) or peer[:64]
 
     def check(self, request: Request, bucket: str, limit: int) -> RateLimitState:
         now = time.time()

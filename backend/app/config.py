@@ -11,7 +11,8 @@ MAX_ANALYSIS_SPAN_YEARS = 60
 MIN_REFERENCE_SPAN_YEARS = 10
 MAX_BOX_SPAN_DEGREES = 10.0
 MAX_LABEL_LENGTH = 80
-# Render appends three entries: the client (from Cloudflare), the Cloudflare edge, and its load balancer.
+# X-Forwarded-For fallback only; the hop count Render adds is not the same on every network path,
+# so CF-Connecting-IP is preferred when trust_proxy_headers is on.
 PROXY_HOPS_WHEN_TRUSTED = 3
 
 
@@ -39,7 +40,9 @@ class Settings(BaseSettings):
     rate_limit_geocode_per_minute: int = Field(60, ge=1)
     geocode_cache_ttl_hours: int = Field(720, ge=1)
     trusted_proxy_hops: int | None = Field(None, ge=0, le=5)
-    # Legacy switch: true means "behind Render", which appends PROXY_HOPS_WHEN_TRUSTED entries.
+    # Header set by the edge proxy with the connecting client's IP, e.g. "cf-connecting-ip".
+    client_ip_header: str | None = None
+    # Legacy switch: true means "behind Render + Cloudflare".
     trust_proxy_headers: bool = False
 
     open_meteo_archive_url: str = "https://archive-api.open-meteo.com/v1/archive"
@@ -59,6 +62,12 @@ class Settings(BaseSettings):
         if self.trusted_proxy_hops is not None:
             return self.trusted_proxy_hops
         return PROXY_HOPS_WHEN_TRUSTED if self.trust_proxy_headers else 0
+
+    @property
+    def client_ip_source_header(self) -> str:
+        if self.client_ip_header is not None:
+            return self.client_ip_header.strip().lower()
+        return "cf-connecting-ip" if self.trust_proxy_headers else ""
 
     @property
     def cors_origin_regex(self) -> str | None:

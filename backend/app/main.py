@@ -73,7 +73,9 @@ def create_app(
     app.state.geocoder = GeocodingService(
         app.state.weather, app.state.cache, settings.open_meteo_geocoding_url, settings.geocode_cache_ttl_hours
     )
-    app.state.limiter = RateLimiter(60.0, settings.proxy_hops, _rate_limit_store(app.state.cache))
+    app.state.limiter = RateLimiter(
+        60.0, settings.proxy_hops, _rate_limit_store(app.state.cache), settings.client_ip_source_header
+    )
 
     app.add_middleware(
         CORSMiddleware,

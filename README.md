@@ -13,7 +13,7 @@ Climate Lens detects heatwaves in historical daily maximum temperature data and 
 The backend is on Render's free tier and sleeps when idle, so the first request after a pause can take up to a minute.
 
 > **Status, stated honestly**
-> - **Implemented and tested:** the full analysis pipeline, the API, CSV and PDF exports, the dashboard, and the map. 115 backend tests and 47 frontend tests pass.
+> - **Implemented and tested:** the full analysis pipeline, the API, CSV and PDF exports, the dashboard, and the map. 122 backend tests and 47 frontend tests pass.
 > - **Verified locally:** the backend and frontend dev servers, run against the live Open-Meteo API.
 > - **Not yet verified:** the Docker Compose stack. Docker Desktop's Linux engine could not start on the development machine because WSL has no distributions installed. The Compose file validates with `docker compose config`, but the containers were not built or run.
 > - **Deployed and verified live (12 October 2026):** frontend on Vercel, backend on Render, cache on MongoDB Atlas (free M0). Live checks passed for CORS from the Vercel origin, a Hyderabad 1990-2025 analysis, the CSV download, and the PDF download. `/api/health` reports `"mode": "mongodb"`, and a repeated Delhi 2000-2024 analysis went from a cache miss (3.9 s) to a MongoDB cache hit (1.1 s).
@@ -171,8 +171,9 @@ All settings come from environment variables; see [.env.example](.env.example). 
 | `RATE_LIMIT_GEOCODE_PER_MINUTE` | `60` | Per-IP limit for city search |
 | `GEOCODE_CACHE_TTL_HOURS` | `720` | TTL for cached city-search results |
 | `OPEN_METEO_GEOCODING_URL` | `https://geocoding-api.open-meteo.com/v1/search` | Geocoding endpoint |
+| `CLIENT_IP_HEADER` | unset | Header holding the client IP, set by the edge proxy (on Render: `cf-connecting-ip`). Only safe if every request passes that proxy. Takes priority over `TRUSTED_PROXY_HOPS`. |
 | `TRUSTED_PROXY_HOPS` | unset | Number of proxies in front of the app that append to `X-Forwarded-For`. The client IP is taken that many entries from the **right**, so values a client adds on the left are ignored. `0` uses the TCP peer address. |
-| `TRUST_PROXY_HEADERS` | `false` | Legacy switch. When `TRUSTED_PROXY_HOPS` is unset, `true` means 3 trusted hops (Render behind Cloudflare: client, Cloudflare edge, Render load balancer) and `false` means 0. |
+| `TRUST_PROXY_HEADERS` | `false` | Legacy switch. When `TRUSTED_PROXY_HOPS` is unset, `true` means "behind Render and Cloudflare": `CLIENT_IP_HEADER=cf-connecting-ip` with 3 `X-Forwarded-For` hops as the fallback. `false` means neither. |
 | `UPSTREAM_TIMEOUT_SECONDS` | `30` | Open-Meteo request timeout |
 | `UPSTREAM_MAX_RETRIES` | `2` | Retries on timeouts, transport errors, and 5xx responses. 429 responses are never retried. |
 | `ENVIRONMENT` | `development` | Informational |
@@ -317,7 +318,7 @@ Insights quote the adjusted p-value, α and the number of years. A significant r
 
 **Rate limiting:** a per-IP 60-second sliding window, configurable, returning `429` with `Retry-After`. Analysis, export and city-search requests have separate buckets.
 - **Shared store:** with MongoDB configured, hit times live in a `rate_limits` collection (TTL-indexed). Each request is checked and recorded in one atomic update, so the limit holds across several instances, overlapping deploys and restarts. If MongoDB fails, that request falls back to the per-process limiter. `/api/health` reports the scope in `limits.rate_limits_scope`.
-- **Client identity:** the client IP is read `TRUSTED_PROXY_HOPS` entries from the right of `X-Forwarded-For`, so a client cannot choose its own identity by sending that header.
+- **Client identity:** on Render the client is taken from Cloudflare's `CF-Connecting-IP` header (`CLIENT_IP_HEADER`), which Cloudflare overwrites on every request, so a client cannot choose its own identity. Counting a fixed number of entries in `X-Forwarded-For` proved unreliable there, because the number of entries Render adds differs between network paths; it remains only as a fallback (`TRUSTED_PROXY_HOPS`). IPv6 clients are grouped by their /64 network, because many rotate temporary addresses inside it.
 - **Visibility:** every rate-limited response carries `X-RateLimit-Limit`, `X-RateLimit-Remaining` and `X-RateLimit-Reset`.
 
 **Calls to Open-Meteo**
@@ -345,7 +346,7 @@ Insights quote the adjusted p-value, α and the number of years. A significant r
 Run them yourself:
 
 ```bash
-cd backend && python -m pytest          # 115 tests
+cd backend && python -m pytest          # 122 tests
 cd frontend && npm test                 # 47 tests (Vitest + React Testing Library)
 cd frontend && npm run build            # type-check + production build
 ```
@@ -354,7 +355,7 @@ Results recorded on 12 October 2026 (Windows 11, Python 3.14.4, Node 25.9):
 
 | Suite | Result |
 | --- | --- |
-| Backend `pytest` | **115 passed** |
+| Backend `pytest` | **122 passed** |
 | Frontend `vitest run` | **47 passed** (4 files) |
 | Frontend `tsc -b && vite build` | Passed |
 | Frontend `oxlint` | No warnings |
@@ -377,7 +378,7 @@ What the backend tests cover (Open-Meteo is mocked with `respx`, so no network i
   - Health and regions endpoints, and valid point, box, and fixed-baseline analyses
   - Validation of coordinates, reversed years, over-long windows, unsupported hazards, conflicting point and box input, and over-long labels
   - Provider 500, timeout, 429, 400, and malformed responses, plus not caching failed fetches
-  - Cache hits and misses, rate limits (spoofed X-Forwarded-For ignored, rate-limit headers, a limit shared by two app instances through MongoDB, and fallback when the store fails), and CORS
+  - Cache hits and misses, rate limits (spoofed X-Forwarded-For ignored, CF-Connecting-IP used when the forwarded chain varies, IPv6 grouped by /64, rate-limit headers, a limit shared by two app instances through MongoDB, and fallback when the store fails), and CORS
   - CSV headers and content, the formula-injection guard, PDF validity and page numbers, and PDF markup escaping
   - **A cross-check that dashboard JSON, CSV rows, and PDF text agree for the same request**
   - City search: parsing, empty results, case-insensitive caching, skipping results without valid coordinates, validation, provider failures (not cached), and its rate limit

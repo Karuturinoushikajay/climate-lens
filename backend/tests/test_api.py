@@ -259,6 +259,52 @@ def test_rate_limit_without_proxy_ignores_forwarded_for(make_client, mock_api):
     assert c.get("/api/analyze", params=q(), headers={"X-Forwarded-For": "2.2.2.2"}).status_code == 429
 
 
+def test_rate_limit_uses_cf_connecting_ip_when_forwarded_chain_varies(make_client, mock_api):
+    mock_api.get(ARCHIVE_URL).mock(side_effect=open_meteo_handler())
+    c = make_client(rate_limit_analyze_per_minute=30, trust_proxy_headers=True)
+    remaining, statuses = [], []
+    for i in range(31):
+        # The entry 3rd from the right changes on every request, as on some Render paths.
+        xff = f"203.0.113.7, 172.68.{i}.1, 10.29.{i}.43, 10.0.0.{i}"
+        r = c.get("/api/analyze", params=q(), headers={"CF-Connecting-IP": "203.0.113.7", "X-Forwarded-For": xff})
+        statuses.append(r.status_code)
+        remaining.append(int(r.headers["x-ratelimit-remaining"]))
+    assert statuses[:30] == [200] * 30 and statuses[30] == 429
+    assert remaining[:30] == list(range(29, -1, -1))
+
+
+def test_rate_limit_groups_ipv6_by_64_network(make_client, mock_api):
+    mock_api.get(ARCHIVE_URL).mock(side_effect=open_meteo_handler())
+    c = make_client(rate_limit_analyze_per_minute=2, client_ip_header="cf-connecting-ip")
+    ips = ["2401:4900:8f9b:3076::1", "2401:4900:8f9b:3076:4936:5a15:a0aa:de2c", "2401:4900:8f9b:3076:ffff::9"]
+    assert [c.get("/api/analyze", params=q(), headers={"CF-Connecting-IP": ip}).status_code for ip in ips] == [200, 200, 429]
+    other_net = c.get("/api/analyze", params=q(), headers={"CF-Connecting-IP": "2401:4900:8f9b:3077::1"})
+    assert other_net.status_code == 200
+
+
+def test_rate_limit_invalid_client_header_falls_back_to_forwarded_for(make_client, mock_api):
+    mock_api.get(ARCHIVE_URL).mock(side_effect=open_meteo_handler())
+    c = make_client(rate_limit_analyze_per_minute=1, client_ip_header="cf-connecting-ip", trusted_proxy_hops=1)
+    h = {"X-Forwarded-For": "198.51.100.20"}
+    assert c.get("/api/analyze", params=q(), headers={**h, "CF-Connecting-IP": "not-an-ip"}).status_code == 200
+    assert c.get("/api/analyze", params=q(), headers=h).status_code == 429
+
+
+@pytest.mark.parametrize(
+    "overrides, header",
+    [
+        ({}, ""),
+        ({"trust_proxy_headers": True}, "cf-connecting-ip"),
+        ({"trust_proxy_headers": True, "client_ip_header": ""}, ""),
+        ({"client_ip_header": " True-Client-IP "}, "true-client-ip"),
+    ],
+)
+def test_client_ip_header_setting(overrides, header):
+    from .conftest import make_settings
+
+    assert make_settings(**overrides).client_ip_source_header == header
+
+
 def test_rate_limit_headers_on_every_response(make_client, mock_api):
     mock_api.get(ARCHIVE_URL).mock(side_effect=open_meteo_handler())
     c = make_client(rate_limit_analyze_per_minute=3)
