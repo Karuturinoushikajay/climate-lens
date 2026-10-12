@@ -240,6 +240,36 @@ describe('App', () => {
     expect(screen.getByRole('button', { name: /run analysis/i })).toBeEnabled()
   })
 
+  it('invalid typed coordinates never move the map or marker', async () => {
+    const user = await renderLoaded()
+    fakeMap.setView.mockClear()
+    const lat = screen.getByLabelText('Latitude')
+    await user.clear(lat)
+    await user.type(lat, '99{Enter}')
+    await new Promise((r) => setTimeout(r, 650))
+    expect(screen.getByText('Latitude must be between -90 and 90.')).toBeInTheDocument()
+    expect(fakeMap.setView).not.toHaveBeenCalled()
+    expect(screen.getByTestId('marker')).toHaveAttribute('data-center', '17.385,78.4867')
+
+    await user.clear(lat)
+    await user.type(lat, '45{Enter}')
+    await waitFor(() => expect(fakeMap.setView).toHaveBeenCalledWith([45, 78.4867], expect.any(Number)))
+    expect(screen.getByTestId('marker')).toHaveAttribute('data-center', '45,78.4867')
+  })
+
+  it('renaming a preset location switches the dropdown to Custom selection', async () => {
+    const user = await renderLoaded()
+    const preset = screen.getByLabelText('Preset region')
+    await user.selectOptions(preset, 'delhi')
+    const label = screen.getByLabelText('Location label')
+    await user.clear(label)
+    await user.type(label, 'Phoenix')
+    expect(preset).toHaveValue('')
+    await user.clear(label)
+    await user.type(label, 'Delhi')
+    expect(preset).toHaveValue('delhi')
+  })
+
   it('run uses typed coordinates even before the debounce commits them', async () => {
     const user = await renderLoaded()
     const lat = screen.getByLabelText('Latitude')

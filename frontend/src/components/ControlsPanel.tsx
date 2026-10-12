@@ -6,6 +6,7 @@ import {
   MIN_YEAR,
   describeLocation,
   sameLocation,
+  validateLocation,
   validateSelection,
   type BaselineMode,
   type Location,
@@ -65,7 +66,8 @@ export function ControlsPanel({
 }: Props) {
   const loc = selection.location
   const [drafts, setDrafts] = useState<Drafts>(() => draftsFor(loc))
-  const presetId = presets.find((p) => sameLocation(presetLocation(p), loc))?.id ?? ''
+  const presetId =
+    presets.find((p) => sameLocation(presetLocation(p), loc) && selection.label.trim() === p.name)?.id ?? ''
 
   // Reset text inputs when the location changes from the map or a preset.
   const [syncedLoc, setSyncedLoc] = useState(loc)
@@ -76,11 +78,12 @@ export function ControlsPanel({
 
   // Commit typed coordinates after a pause rather than on every keystroke.
   const draftLoc = parseDrafts(loc.kind, drafts)
+  const draftValid = draftLoc !== null && validateLocation(draftLoc).length === 0
   const commitDrafts = () => {
-    if (draftLoc && !sameLocation(draftLoc, loc)) onLocation(draftLoc)
+    if (draftValid && !sameLocation(draftLoc, loc)) onLocation(draftLoc)
   }
   useEffect(() => {
-    if (!draftLoc || sameLocation(draftLoc, loc)) return
+    if (!draftValid || sameLocation(draftLoc, loc)) return
     const t = setTimeout(commitDrafts, COORD_DEBOUNCE_MS)
     return () => clearTimeout(t)
   }, [drafts]) // eslint-disable-line react-hooks/exhaustive-deps

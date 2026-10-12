@@ -48,9 +48,8 @@ export function normalizeBox(a: [number, number], b: [number, number]): Location
   }
 }
 
-export function validateSelection(s: Selection, maxYear = DEFAULT_MAX_YEAR): string[] {
+export function validateLocation(loc: Location): string[] {
   const errors: string[] = []
-  const loc = s.location
   if (loc.kind === 'point') {
     if (!Number.isFinite(loc.latitude) || loc.latitude < -90 || loc.latitude > 90)
       errors.push('Latitude must be between -90 and 90.')
@@ -66,6 +65,11 @@ export function validateSelection(s: Selection, maxYear = DEFAULT_MAX_YEAR): str
         errors.push(`Box sides must not exceed ${MAX_BOX_SPAN} degrees.`)
     }
   }
+  return errors
+}
+
+export function validateSelection(s: Selection, maxYear = DEFAULT_MAX_YEAR): string[] {
+  const errors = validateLocation(s.location)
   if (!Number.isInteger(s.startYear) || !Number.isInteger(s.endYear)) errors.push('Years must be whole numbers.')
   else {
     if (s.startYear < MIN_YEAR || s.endYear > maxYear) errors.push(`Years must be between ${MIN_YEAR} and ${maxYear}.`)
