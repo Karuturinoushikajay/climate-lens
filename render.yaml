@@ -21,6 +21,8 @@ services:
         value: climate_lens
       - key: ALLOWED_ORIGINS
         sync: false
+      - key: ALLOWED_ORIGIN_REGEX
+        value: https://climate-lens(-[a-z0-9]+)?-karuturinoushikajays-projects\.vercel\.app
       - key: TRUST_PROXY_HEADERS
         value: "true"
       - key: OBSERVATION_CACHE_TTL_HOURS

@@ -8,7 +8,7 @@ Climate Lens detects heatwaves in historical daily maximum temperature data and 
 - **Data:** [Open-Meteo Historical Weather API](https://open-meteo.com/en/docs/historical-weather-api), daily `temperature_2m_max` from ERA5 / ERA5-Land reanalysis
 
 > **Status, stated honestly**
-> - **Implemented and tested:** the full analysis pipeline, the API, CSV and PDF exports, the dashboard, and the map. 88 backend tests and 32 frontend tests pass.
+> - **Implemented and tested:** the full analysis pipeline, the API, CSV and PDF exports, the dashboard, and the map. 89 backend tests and 32 frontend tests pass.
 > - **Verified locally:** the backend and frontend dev servers, run against the live Open-Meteo API.
 > - **Not yet verified:** the Docker Compose stack. Docker Desktop's Linux engine could not start on the development machine because WSL has no distributions installed. The Compose file validates with `docker compose config`, but the containers were not built or run.
 > - **Not deployed.** No public URL exists yet.
@@ -157,6 +157,7 @@ All settings come from environment variables; see [.env.example](.env.example). 
 | `MONGODB_URI` | empty | MongoDB connection string. Empty means in-memory cache. |
 | `MONGODB_DATABASE` | `climate_lens` | Database name |
 | `ALLOWED_ORIGINS` | `http://localhost:5173` | Comma-separated CORS allow-list. Set this to the deployed frontend origin. |
+| `ALLOWED_ORIGIN_REGEX` | empty | Optional full-match regex for additional origins, such as Vercel's per-deployment URLs (`https://climate-lens(-[a-z0-9]+)?-<team>\.vercel\.app`) |
 | `OBSERVATION_CACHE_TTL_HOURS` | `720` | TTL for raw provider series |
 | `ANALYSIS_CACHE_TTL_HOURS` | `168` | TTL for derived analyses |
 | `RATE_LIMIT_ANALYZE_PER_MINUTE` | `30` | Per-IP limit for `/api/analyze` |
@@ -314,7 +315,7 @@ A non-significant result is never presented as proof of no trend, and neither me
 - PDF text is XML-escaped, so ReportLab markup in labels is not interpreted.
 
 **HTTP**
-- CORS is restricted to `ALLOWED_ORIGINS` and only `GET` is allowed.
+- CORS is restricted to `ALLOWED_ORIGINS` (plus the optional `ALLOWED_ORIGIN_REGEX`) and only `GET` is allowed.
 - Security headers include `nosniff`, `X-Frame-Options: DENY`, and `Referrer-Policy`.
 - Error responses never include stack traces.
 
@@ -328,7 +329,7 @@ A non-significant result is never presented as proof of no trend, and neither me
 Run them yourself:
 
 ```bash
-cd backend && python -m pytest          # 88 tests
+cd backend && python -m pytest          # 89 tests
 cd frontend && npm test                 # 32 tests (Vitest + React Testing Library)
 cd frontend && npm run build            # type-check + production build
 ```
@@ -337,7 +338,7 @@ Results recorded on 12 October 2026 (Windows 11, Python 3.14.4, Node 25.9):
 
 | Suite | Result |
 | --- | --- |
-| Backend `pytest` | **88 passed** |
+| Backend `pytest` | **89 passed** |
 | Frontend `vitest run` | **32 passed** (4 files) |
 | Frontend `tsc -b && vite build` | Passed |
 | Frontend `oxlint` | No warnings |
@@ -400,7 +401,7 @@ Nothing has been deployed yet. These are the steps:
 
 1. Import the repository in Vercel and set the **Root Directory** to `frontend`. The framework is Vite and `vercel.json` is included.
 2. Add the environment variable `VITE_API_BASE_URL=https://<service>.onrender.com`.
-3. Deploy. Then update `ALLOWED_ORIGINS` on Render to the exact Vercel URL and redeploy the backend.
+3. Deploy. Then update `ALLOWED_ORIGINS` on Render to the exact Vercel production URL and redeploy the backend. Vercel also gives every deployment its own URL; `ALLOWED_ORIGIN_REGEX` in `render.yaml` allows those for this project's Vercel team.
 
 Netlify works too: base directory `frontend`, build command `npm run build`, publish directory `dist`, the same environment variable, and a SPA redirect `/* /index.html 200`.
 

@@ -224,6 +224,19 @@ def test_cors_restricted(client):
     assert "access-control-allow-origin" not in bad.headers
 
 
+def test_cors_origin_regex_and_trailing_slash(make_client):
+    client = make_client(
+        allowed_origins="https://climate-lens.vercel.app/",
+        allowed_origin_regex=r"https://climate-lens(-[a-z0-9]+)?-team\.vercel\.app",
+    )
+    for origin in ("https://climate-lens.vercel.app", "https://climate-lens-7c11f9you-team.vercel.app"):
+        r = client.get("/api/health", headers={"Origin": origin})
+        assert r.headers.get("access-control-allow-origin") == origin
+    for origin in ("https://climate-lens-x-other.vercel.app", "https://climate-lens-1-team.vercel.app.evil.com"):
+        r = client.get("/api/health", headers={"Origin": origin})
+        assert "access-control-allow-origin" not in r.headers
+
+
 # ---------------------------------------------------------------- exports
 
 def _parse_csv(text: str):

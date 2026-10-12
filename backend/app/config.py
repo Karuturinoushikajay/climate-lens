@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     mongodb_timeout_ms: int = 3000
 
     allowed_origins: str = "http://localhost:5173"
+    allowed_origin_regex: str = ""
 
     observation_cache_ttl_hours: int = Field(720, ge=1)
     analysis_cache_ttl_hours: int = Field(168, ge=1)
@@ -44,7 +45,11 @@ class Settings(BaseSettings):
 
     @property
     def cors_origins(self) -> list[str]:
-        return [o.strip() for o in self.allowed_origins.split(",") if o.strip()]
+        return [o.strip().rstrip("/") for o in self.allowed_origins.split(",") if o.strip()]
+
+    @property
+    def cors_origin_regex(self) -> str | None:
+        return self.allowed_origin_regex.strip() or None
 
     @property
     def is_production(self) -> bool:
