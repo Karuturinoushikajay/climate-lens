@@ -27,7 +27,7 @@ Backend test paths are relative to `backend/tests/`. Frontend test paths are rel
 | 14 | API caching, rate limiting, and safe handling of user input | A (evaluation criterion) | Cache store; `security/rate_limit.py`; validation; label sanitising; CSV formula guard; PDF markup escaping; restricted CORS | `test_rate_limit`, `test_cors_restricted`, `test_csv_formula_injection_is_neutralised`, `test_pdf_label_markup_is_escaped` |
 | 15 | README with setup, architecture, data sources, hazard logic, assumptions, and improvements | A | `README.md`, `docs/architecture.md` | n/a |
 | 16 | Disclose AI tool use | A | README section "AI-tool disclosure" | n/a |
-| 17 | Public GitHub repository and deployed app URL | A | Deployment configs (`render.yaml`, `frontend/vercel.json`) and step-by-step instructions | **Not done.** Pushing and deploying need the owner's accounts and authorisation. |
+| 17 | Public GitHub repository and deployed app URL | A | Deployment configs (`render.yaml`, `frontend/vercel.json`) and step-by-step instructions | **Done.** Repository: https://github.com/Karuturinoushikajay/climate-lens. Live app: https://climate-lens-gamma.vercel.app, with the API at https://climate-lens-api.onrender.com. Verified live on 12 October 2026: CORS, an analysis, and the CSV and PDF downloads. |
 
 ## Bonus challenges
 

@@ -7,11 +7,16 @@ Climate Lens detects heatwaves in historical daily maximum temperature data and 
 - **Storage:** MongoDB with TTL indexes, falling back to an in-process cache
 - **Data:** [Open-Meteo Historical Weather API](https://open-meteo.com/en/docs/historical-weather-api), daily `temperature_2m_max` from ERA5 / ERA5-Land reanalysis
 
+**Live demo:** https://climate-lens-gamma.vercel.app
+**API:** https://climate-lens-api.onrender.com/api/health (interactive docs at [/docs](https://climate-lens-api.onrender.com/docs))
+
+The backend is on Render's free tier and sleeps when idle, so the first request after a pause can take up to a minute.
+
 > **Status, stated honestly**
 > - **Implemented and tested:** the full analysis pipeline, the API, CSV and PDF exports, the dashboard, and the map. 89 backend tests and 32 frontend tests pass.
 > - **Verified locally:** the backend and frontend dev servers, run against the live Open-Meteo API.
 > - **Not yet verified:** the Docker Compose stack. Docker Desktop's Linux engine could not start on the development machine because WSL has no distributions installed. The Compose file validates with `docker compose config`, but the containers were not built or run.
-> - **Not deployed.** No public URL exists yet.
+> - **Deployed and verified live (12 October 2026):** frontend on Vercel, backend on Render, using the in-memory cache (no MongoDB Atlas connected yet). Live checks passed for CORS from the Vercel origin, a Hyderabad 1990-2025 analysis, the CSV download, and the PDF download.
 
 ---
 
@@ -379,7 +384,7 @@ What the frontend tests cover:
 
 ## Deployment
 
-Nothing has been deployed yet. These are the steps:
+The live demo was deployed with the steps below. MongoDB Atlas (step 1) is optional and not yet connected.
 
 ### 1. MongoDB Atlas (free M0 cluster)
 
@@ -419,14 +424,11 @@ Netlify works too: base directory `frontend`, build command `npm run build`, pub
 
 ## Publishing to GitHub
 
-The repository is initialised locally on branch `main` but has **no commits and no remote**. Nothing is pushed without your authorisation. When you are ready:
+The code is published at https://github.com/Karuturinoushikajay/climate-lens. Vercel and Render redeploy automatically on pushes to `main`. To publish a fork elsewhere:
 
 ```bash
-git add .
 git status                      # confirm the case-study PDF, .env, node_modules and .venv are NOT listed
-git commit -m "Climate Lens: heatwave trend analyzer"
-gh repo create climate-hazard-trend-analyzer --public --source . --remote origin --push
-# or: git remote add origin https://github.com/<you>/climate-hazard-trend-analyzer.git && git push -u origin main
+gh repo create <name> --public --source . --remote origin --push
 ```
 
 The brief asks that it not be published, so `*.pdf` is in `.gitignore`.
