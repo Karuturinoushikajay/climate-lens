@@ -6,7 +6,7 @@ import { HEALTH, PRESETS, makeAnalysis } from './test/fixtures'
 vi.mock('react-leaflet', async () => (await import('./test/leafletMock')).leafletMock)
 
 import App from './App'
-import { mapClick } from './test/leafletMock'
+import { fakeMap, mapClick } from './test/leafletMock'
 
 type Responder = (url: URL, init?: RequestInit) => Promise<Response>
 
@@ -211,6 +211,61 @@ describe('App', () => {
     exportResponder = async () => json({ error: { code: 'rate_limited', message: 'Too many requests.' } }, 429)
     await user.click(screen.getByRole('button', { name: /export pdf/i }))
     expect(await screen.findByText(/Too many requests/)).toBeInTheDocument()
+  })
+
+  it('preset dropdown follows the selection: map clicks and box mode switch it to Custom', async () => {
+    const user = await renderLoaded()
+    const preset = screen.getByLabelText('Preset region')
+    expect(preset).toHaveValue('hyderabad')
+    await user.selectOptions(preset, 'delhi')
+    expect(preset).toHaveValue('delhi')
+    act(() => mapClick(20, 76))
+    expect(preset).toHaveValue('')
+    await user.selectOptions(preset, 'delhi')
+    await user.click(screen.getByRole('button', { name: /lat-lon box/i }))
+    expect(preset).toHaveValue('')
+  })
+
+  it('validation errors clear as soon as the typed coordinate is fixed', async () => {
+    const user = await renderLoaded()
+    const lat = screen.getByLabelText('Latitude')
+    await user.clear(lat)
+    await user.type(lat, '95')
+    expect(screen.getByText('Latitude must be between -90 and 90.')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /run analysis/i })).toBeDisabled()
+    await user.clear(lat)
+    expect(screen.getByText('Enter a number for every coordinate.')).toBeInTheDocument()
+    await user.type(lat, '45')
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /run analysis/i })).toBeEnabled()
+  })
+
+  it('run uses typed coordinates even before the debounce commits them', async () => {
+    const user = await renderLoaded()
+    const lat = screen.getByLabelText('Latitude')
+    await user.clear(lat)
+    await user.type(lat, '12.5')
+    await user.click(screen.getByRole('button', { name: /run analysis/i }))
+    await waitFor(() => expect(lastAnalyze().get('latitude')).toBe('12.5'))
+  })
+
+  it('typed coordinates move the map', async () => {
+    const user = await renderLoaded()
+    fakeMap.setView.mockClear()
+    const lat = screen.getByLabelText('Latitude')
+    await user.clear(lat)
+    await user.type(lat, '12.5{Enter}')
+    await waitFor(() => expect(fakeMap.setView).toHaveBeenCalledWith([12.5, 78.4867], expect.any(Number)))
+  })
+
+  it('export status resets when a different analysis is shown', async () => {
+    const user = await renderLoaded()
+    await user.click(screen.getByRole('button', { name: /export csv/i }))
+    expect(await screen.findByText(/Downloaded climate-lens-test.csv/)).toBeInTheDocument()
+    await user.selectOptions(screen.getByLabelText('Preset region'), 'delhi')
+    await user.click(screen.getByRole('button', { name: /run analysis/i }))
+    await waitFor(() => expect(screen.getByTestId('result-title')).toHaveTextContent('Delhi'))
+    expect(screen.queryByText(/Downloaded/)).not.toBeInTheDocument()
   })
 
   it('unsupported hazards are visible but disabled', async () => {

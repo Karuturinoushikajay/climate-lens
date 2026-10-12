@@ -6,6 +6,7 @@ import {
   MIN_YEAR,
   describeLocation,
   sameLocation,
+  validateSelection,
   type BaselineMode,
   type Location,
   type Selection,
@@ -25,11 +26,10 @@ interface Props {
   presets: PresetRegion[]
   presetsError: string | null
   maxYear: number
-  errors: string[]
   loading: boolean
   onLocation: (location: Location, label?: string) => void
   onChange: (patch: Partial<Selection>) => void
-  onAnalyze: () => void
+  onAnalyze: (location: Location) => void
 }
 
 type Drafts = Record<string, string>
@@ -49,12 +49,15 @@ function parseDrafts(kind: Location['kind'], d: Drafts): Location | null {
     : { kind, south: nums[0], west: nums[1], north: nums[2], east: nums[3] }
 }
 
+function presetLocation(p: PresetRegion): Location {
+  return p.bbox ? { kind: 'box', ...p.bbox } : { kind: 'point', latitude: p.latitude, longitude: p.longitude }
+}
+
 export function ControlsPanel({
   selection,
   presets,
   presetsError,
   maxYear,
-  errors,
   loading,
   onLocation,
   onChange,
@@ -62,7 +65,7 @@ export function ControlsPanel({
 }: Props) {
   const loc = selection.location
   const [drafts, setDrafts] = useState<Drafts>(() => draftsFor(loc))
-  const [presetId, setPresetId] = useState('hyderabad')
+  const presetId = presets.find((p) => sameLocation(presetLocation(p), loc))?.id ?? ''
 
   // Reset text inputs when the location changes from the map or a preset.
   const [syncedLoc, setSyncedLoc] = useState(loc)
@@ -72,22 +75,30 @@ export function ControlsPanel({
   }
 
   // Commit typed coordinates after a pause rather than on every keystroke.
+  const draftLoc = parseDrafts(loc.kind, drafts)
+  const commitDrafts = () => {
+    if (draftLoc && !sameLocation(draftLoc, loc)) onLocation(draftLoc)
+  }
   useEffect(() => {
-    const parsed = parseDrafts(loc.kind, drafts)
-    if (!parsed || sameLocation(parsed, loc)) return
-    const t = setTimeout(() => {
-      setPresetId('')
-      onLocation(parsed)
-    }, COORD_DEBOUNCE_MS)
+    if (!draftLoc || sameLocation(draftLoc, loc)) return
+    const t = setTimeout(commitDrafts, COORD_DEBOUNCE_MS)
     return () => clearTimeout(t)
   }, [drafts]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Validate what is typed, not only what has been committed, so errors clear as soon as the input is fixed.
+  const errors = draftLoc
+    ? validateSelection({ ...selection, location: draftLoc }, maxYear)
+    : ['Enter a number for every coordinate.']
+
+  const runAnalysis = () => {
+    if (!draftLoc || errors.length > 0) return
+    commitDrafts()
+    onAnalyze(draftLoc)
+  }
+
   const choosePreset = (id: string) => {
-    setPresetId(id)
     const p = presets.find((r) => r.id === id)
-    if (!p) return
-    if (p.bbox) onLocation({ kind: 'box', ...p.bbox }, p.name)
-    else onLocation({ kind: 'point', latitude: p.latitude, longitude: p.longitude }, p.name)
+    if (p) onLocation(presetLocation(p), p.name)
   }
 
   const coordField = (key: string, label: string, min: number, max: number) => (
@@ -102,6 +113,8 @@ export function ControlsPanel({
         value={drafts[key] ?? ''}
         aria-label={label}
         onChange={(e) => setDrafts((d) => ({ ...d, [key]: e.target.value }))}
+        onBlur={commitDrafts}
+        onKeyDown={(e) => e.key === 'Enter' && commitDrafts()}
       />
     </label>
   )
@@ -254,7 +267,7 @@ export function ControlsPanel({
         </ul>
       )}
 
-      <button type="button" className="primary" onClick={onAnalyze} disabled={loading || errors.length > 0}>
+      <button type="button" className="primary" onClick={runAnalysis} disabled={loading || errors.length > 0}>
         {loading ? <Loader2 size={16} className="spin" aria-hidden /> : <Play size={16} aria-hidden />}
         {loading ? 'Analysing…' : 'Run analysis'}
       </button>

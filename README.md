@@ -13,7 +13,7 @@ Climate Lens detects heatwaves in historical daily maximum temperature data and 
 The backend is on Render's free tier and sleeps when idle, so the first request after a pause can take up to a minute.
 
 > **Status, stated honestly**
-> - **Implemented and tested:** the full analysis pipeline, the API, CSV and PDF exports, the dashboard, and the map. 89 backend tests and 32 frontend tests pass.
+> - **Implemented and tested:** the full analysis pipeline, the API, CSV and PDF exports, the dashboard, and the map. 89 backend tests and 37 frontend tests pass.
 > - **Verified locally:** the backend and frontend dev servers, run against the live Open-Meteo API.
 > - **Not yet verified:** the Docker Compose stack. Docker Desktop's Linux engine could not start on the development machine because WSL has no distributions installed. The Compose file validates with `docker compose config`, but the containers were not built or run.
 > - **Deployed and verified live (12 October 2026):** frontend on Vercel, backend on Render, cache on MongoDB Atlas (free M0). Live checks passed for CORS from the Vercel origin, a Hyderabad 1990-2025 analysis, the CSV download, and the PDF download. `/api/health` reports `"mode": "mongodb"`, and a repeated Delhi 2000-2024 analysis went from a cache miss (3.9 s) to a MongoDB cache hit (1.1 s).
@@ -335,7 +335,7 @@ Run them yourself:
 
 ```bash
 cd backend && python -m pytest          # 89 tests
-cd frontend && npm test                 # 32 tests (Vitest + React Testing Library)
+cd frontend && npm test                 # 37 tests (Vitest + React Testing Library)
 cd frontend && npm run build            # type-check + production build
 ```
 
@@ -344,7 +344,7 @@ Results recorded on 12 October 2026 (Windows 11, Python 3.14.4, Node 25.9):
 | Suite | Result |
 | --- | --- |
 | Backend `pytest` | **89 passed** |
-| Frontend `vitest run` | **32 passed** (4 files) |
+| Frontend `vitest run` | **37 passed** (4 files) |
 | Frontend `tsc -b && vite build` | Passed |
 | Frontend `oxlint` | No warnings |
 | Live smoke test against the real Open-Meteo API | Passed. Point analyses for Hyderabad (1990-2025) and Delhi (1995-2024) returned complete data, a valid CSV, and a valid 5-page PDF. A Telangana box (2015-2024) sampled 4 grid points with no excluded years. |

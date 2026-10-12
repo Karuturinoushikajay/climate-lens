@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { vi } from 'vitest'
 
 type ClickHandler = (e: { latlng: { lat: number; lng: number } }) => void
 
@@ -9,7 +10,7 @@ export function mapClick(lat: number, lng: number) {
   mapState.click({ latlng: { lat, lng } })
 }
 
-const fakeMap = { setView: () => undefined, fitBounds: () => undefined, getZoom: () => 6 }
+export const fakeMap = { setView: vi.fn(), fitBounds: vi.fn(), getZoom: () => 6 }
 
 export const leafletMock = {
   MapContainer: ({ children }: { children: ReactNode }) => <div data-testid="map">{children}</div>,

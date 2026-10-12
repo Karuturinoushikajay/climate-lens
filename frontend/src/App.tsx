@@ -33,7 +33,6 @@ export default function App() {
   const { state, run } = useAnalysis()
 
   const maxYear = health?.limits.max_year ?? DEFAULT_MAX_YEAR
-  const errors = useMemo(() => validateSelection(selection, maxYear), [selection, maxYear])
   const currentParams = useMemo(() => toQueryParams(selection), [selection])
 
   useEffect(() => {
@@ -59,10 +58,10 @@ export default function App() {
       if (presetLabel !== undefined) {
         setSelection((s) => ({ ...s, location, label: presetLabel }))
         setLabelFromPreset(true)
-        setFocusToken((t) => t + 1)
       } else {
         setSelection((s) => ({ ...s, location, label: labelFromPreset ? '' : s.label }))
       }
+      setFocusToken((t) => t + 1)
     },
     [labelFromPreset],
   )
@@ -110,8 +109,9 @@ export default function App() {
     setFocusToken((t) => t + 1)
   }
 
-  const analyze = () => {
-    if (errors.length === 0) run(currentParams)
+  const analyze = (location: Location) => {
+    const next = { ...selection, location }
+    if (validateSelection(next, maxYear).length === 0) run(toQueryParams(next))
   }
 
   const loading = state.status === 'loading'
@@ -151,7 +151,6 @@ export default function App() {
             presets={presets}
             presetsError={presetsError}
             maxYear={maxYear}
-            errors={errors}
             loading={loading}
             onLocation={onLocation}
             onChange={onChange}
@@ -214,7 +213,7 @@ export default function App() {
                   cache {shown.data.cache.analysis}
                 </p>
               </div>
-              <ExportButtons params={shown.params} disabled={loading} />
+              <ExportButtons key={paramsKey(shown.params)} params={shown.params} disabled={loading} />
             </section>
 
             <SummaryCards data={shown.data} />
