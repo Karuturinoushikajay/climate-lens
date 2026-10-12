@@ -3,6 +3,7 @@ import { AlertTriangle, Leaf, RefreshCw } from 'lucide-react'
 import { fetchHealth, fetchRegions } from './api/client'
 import type { HealthResponse, PresetRegion } from './api/types'
 import { ControlsPanel } from './components/ControlsPanel'
+import { DataQualityPanel } from './components/DataQualityPanel'
 import { ExportButtons } from './components/ExportButtons'
 import { InsightsPanel } from './components/InsightsPanel'
 import { MapPanel, type SelectMode } from './components/MapPanel'
@@ -17,6 +18,7 @@ import {
   DEFAULT_SELECTION,
   describeLocation,
   paramsKey,
+  percentileLabel,
   toQueryParams,
   validateSelection,
   type Location,
@@ -212,6 +214,10 @@ export default function App() {
                   · {shown.data.baseline.mode === 'analysis_period' ? 'analysis-period baseline' : 'fixed reference baseline'} ·
                   cache {shown.data.cache.analysis}
                 </p>
+                <p className="fine" data-testid="result-hazard">
+                  Heatwave: {percentileLabel(shown.data.hazard.percentile)} · {shown.data.hazard.min_duration_days}+ days
+                  {(shown.data.data_quality.gap_fill ?? 'off') !== 'off' && ' · single-day gaps filled'}
+                </p>
                 <p className="fine" data-testid="result-dataset">
                   Data: {shown.data.source.dataset}
                 </p>
@@ -219,7 +225,17 @@ export default function App() {
               <ExportButtons key={paramsKey(shown.params)} params={shown.params} disabled={loading} />
             </section>
 
+            <p className="limitations" role="note" data-testid="limitations">
+              <strong>Limitations:</strong> values come from ERA5 reanalysis (a model estimate on a 0.25°, roughly 28 km, grid), not
+              from weather stations. The {percentileLabel(shown.data.hazard.percentile)} threshold is relative to this
+              location's own climate, so the same label means different temperatures in different places. A
+              statistically significant trend is an association in this record, not proof of a cause.{' '}
+              <a href="#limitations">Sources &amp; limitations</a>
+            </p>
+
             <SummaryCards data={shown.data} />
+
+            <DataQualityPanel data={shown.data} />
 
             <section id="trends" className="charts">
               <HeatwaveDaysChart data={shown.data} />
@@ -238,7 +254,7 @@ export default function App() {
               <YearTable data={shown.data} />
             </div>
 
-            <section className="panel disclaimer" aria-label="Sources and limitations">
+            <section id="limitations" className="panel disclaimer" aria-label="Sources and limitations">
               <h2>Sources &amp; limitations</h2>
               <ul>
                 {shown.data.caveats.map((c) => (

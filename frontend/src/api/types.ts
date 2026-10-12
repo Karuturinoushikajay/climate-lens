@@ -119,6 +119,10 @@ export interface AnnualRow {
   missing_days: number
   completeness: number
   sufficient_data: boolean
+  interpolated_days?: number
+  duplicate_dates?: number
+  implausible_days?: number
+  outlier_days?: number
   heatwave_days_rolling_mean: number | null
   event_count_rolling_mean: number | null
 }
@@ -143,7 +147,15 @@ export interface QualityBlock {
   null_values: number
   implausible_values: number
   duplicate_dates: number
+  interpolated_days?: number
+  outlier_days?: number
   completeness: number
+}
+
+export interface OutlierDay {
+  date: string
+  tmax_c: number
+  robust_z: number
 }
 
 export interface AnalysisResponse {
@@ -204,6 +216,9 @@ export interface AnalysisResponse {
     min_year_completeness: number
     insufficient_years: number[]
     plausible_range_c: number[]
+    gap_fill?: string
+    outlier_method?: string
+    outlier_dates?: OutlierDay[]
   }
   insights: string[]
   caveats: string[]

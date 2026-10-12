@@ -12,6 +12,8 @@ function Quality({ title, q }: { title: string; q: QualityBlock }) {
         <div className="stat-row"><dt>Null values</dt><dd>{q.null_values}</dd></div>
         <div className="stat-row"><dt>Implausible values</dt><dd>{q.implausible_values}</dd></div>
         <div className="stat-row"><dt>Duplicate dates</dt><dd>{q.duplicate_dates}</dd></div>
+        <div className="stat-row"><dt>Interpolated days</dt><dd>{q.interpolated_days ?? 0}</dd></div>
+        <div className="stat-row"><dt>Outlier days (kept)</dt><dd>{q.outlier_days ?? 0}</dd></div>
         <div className="stat-row"><dt>Completeness</dt><dd>{pct(q.completeness, 2)}</dd></div>
       </dl>
     </div>
@@ -36,8 +38,11 @@ export function MethodologyPanel({ data }: { data: AnalysisResponse }) {
           </dl>
           <p className="fine">{b.note}</p>
           <p className="fine">
-            Events are counted in the year they start; their days are attributed to the year each day falls in. Any
-            missing day breaks a run. Years below {pct(q.min_year_completeness, 0)} completeness are excluded from
+            Events are counted in the year they start; their days are attributed to the year each day falls in.{' '}
+            {(q.gap_fill ?? 'off') !== 'off'
+              ? 'Isolated one-day gaps are filled with the mean of their neighbours and flagged; longer gaps break a run.'
+              : 'Any missing day breaks a run.'}{' '}
+            Years below {pct(q.min_year_completeness, 0)} completeness are excluded from
             trend statistics
             {q.insufficient_years.length ? ` (excluded: ${q.insufficient_years.join(', ')})` : ' (none excluded)'}.
           </p>

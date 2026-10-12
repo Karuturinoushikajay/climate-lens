@@ -12,6 +12,10 @@ export type Location =
 
 export type BaselineMode = 'analysis_period' | 'fixed_reference'
 
+export const PERCENTILE_OPTIONS = [90, 92.5, 95, 97.5, 99] as const
+export const MIN_RUN_DAYS = 2
+export const MAX_RUN_DAYS = 10
+
 export interface Selection {
   location: Location
   label: string
@@ -21,6 +25,9 @@ export interface Selection {
   baseline: BaselineMode
   referenceStartYear: number
   referenceEndYear: number
+  percentile: number
+  minDurationDays: number
+  fillGaps: boolean
 }
 
 export const DEFAULT_SELECTION: Selection = {
@@ -32,6 +39,13 @@ export const DEFAULT_SELECTION: Selection = {
   baseline: 'fixed_reference',
   referenceStartYear: 1991,
   referenceEndYear: 2020,
+  percentile: 95,
+  minDurationDays: 3,
+  fillGaps: false,
+}
+
+export function percentileLabel(p: number): string {
+  return `${p}th percentile`
 }
 
 export function round4(n: number): number {
@@ -77,10 +91,24 @@ export function validateSelection(s: Selection, maxYear = DEFAULT_MAX_YEAR): str
     if (s.endYear - s.startYear + 1 > MAX_SPAN_YEARS) errors.push(`The analysis window may not exceed ${MAX_SPAN_YEARS} years.`)
   }
   if (s.baseline === 'fixed_reference') {
-    if (s.referenceStartYear < MIN_YEAR || s.referenceEndYear > maxYear)
-      errors.push(`Reference years must be between ${MIN_YEAR} and ${maxYear}.`)
-    if (s.referenceEndYear - s.referenceStartYear + 1 < 10) errors.push('The reference period must span at least 10 years.')
+    if (!Number.isInteger(s.referenceStartYear) || !Number.isInteger(s.referenceEndYear))
+      errors.push('Reference years must be whole numbers.')
+    else {
+      if (s.referenceStartYear < MIN_YEAR || s.referenceEndYear > maxYear)
+        errors.push(`Reference years must be between ${MIN_YEAR} and ${maxYear}.`)
+      if (s.referenceStartYear > s.referenceEndYear)
+        errors.push('Reference start year must not be after reference end year.')
+      else {
+        const span = s.referenceEndYear - s.referenceStartYear + 1
+        if (span < 10) errors.push('The reference period must span at least 10 years.')
+        if (span > MAX_SPAN_YEARS) errors.push(`The reference period may not exceed ${MAX_SPAN_YEARS} years.`)
+      }
+    }
   }
+  if (!(PERCENTILE_OPTIONS as readonly number[]).includes(s.percentile))
+    errors.push(`Percentile must be one of ${PERCENTILE_OPTIONS.join(', ')}.`)
+  if (!Number.isInteger(s.minDurationDays) || s.minDurationDays < MIN_RUN_DAYS || s.minDurationDays > MAX_RUN_DAYS)
+    errors.push(`Minimum consecutive days must be a whole number from ${MIN_RUN_DAYS} to ${MAX_RUN_DAYS}.`)
   if (s.label.length > MAX_LABEL_LENGTH) errors.push(`Label must be ${MAX_LABEL_LENGTH} characters or fewer.`)
   return errors
 }
@@ -91,7 +119,10 @@ export function toQueryParams(s: Selection): QueryParams {
     end_year: s.endYear,
     hazard: s.hazard,
     baseline: s.baseline,
+    percentile: s.percentile,
+    min_duration_days: s.minDurationDays,
   }
+  if (s.fillGaps) params.fill_gaps = 'true'
   if (s.location.kind === 'point') {
     params.latitude = round4(s.location.latitude)
     params.longitude = round4(s.location.longitude)

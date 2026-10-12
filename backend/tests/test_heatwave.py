@@ -6,6 +6,7 @@ from app.climate.heatwave import (
     annual_indicators,
     build_daily_series,
     detect_events,
+    flag_outliers,
     percentile_threshold,
 )
 
@@ -192,3 +193,100 @@ def test_annual_completeness_and_leap_year():
     assert a.completeness == pytest.approx(266 / 366)
     assert a.sufficient_data is False
     assert a.mean_tmax == pytest.approx(COOL)
+
+
+# ---------- gap fill and outliers ----------
+
+def _filled(temps: list[float | None], start: date = date(2001, 1, 1)):
+    dates = [(start + timedelta(days=i)).isoformat() for i in range(len(temps))]
+    return build_daily_series(dates, temps, start, start + timedelta(days=len(temps) - 1), fill_single_gaps=True)
+
+
+def test_gap_fill_is_off_by_default():
+    records = series(date(2001, 1, 1), [HOT, None, HOT])
+    assert records[1].tmax is None and records[1].flag == "null"
+
+
+def test_single_day_gap_is_filled_and_flagged():
+    records, q = _filled([HOT, None, 37.0])
+    assert records[1].tmax == pytest.approx(36.0)
+    assert records[1].flag == "interpolated"
+    assert q.interpolated_days == 1
+    assert q.valid_days == 2  # observed only
+    assert q.completeness == pytest.approx(2 / 3)
+
+
+def test_two_day_gap_is_not_filled():
+    records, q = _filled([HOT, None, None, HOT])
+    assert [r.tmax for r in records[1:3]] == [None, None]
+    assert q.interpolated_days == 0
+
+
+def test_gaps_at_series_edges_are_not_filled():
+    records, q = _filled([None, HOT, HOT, None])
+    assert records[0].tmax is None and records[-1].tmax is None
+    assert q.interpolated_days == 0
+
+
+def test_implausible_day_is_filled_only_when_opted_in():
+    records, q = _filled([HOT, 99.0, HOT])
+    assert records[1].flag == "interpolated"
+    assert q.implausible_values == 1
+
+
+def test_interpolated_day_completes_a_run_but_not_the_threshold():
+    records, _ = _filled([COOL, HOT, None, HOT, COOL])
+    assert len(detect_events(records, T)) == 1
+    observed = [r.tmax for r in records if r.observed]
+    assert observed == [COOL, HOT, HOT, COOL]
+    assert records[2].filled_from == "null"
+
+
+def test_annual_counts_interpolated_duplicates_and_implausible():
+    start = date(2001, 1, 1)
+    temps: list[float | None] = [COOL] * 365
+    temps[10] = None
+    temps[20] = 99.0
+    dates = [(start + timedelta(days=i)).isoformat() for i in range(365)] + ["2001-03-01"]
+    records, q = build_daily_series(dates, temps + [COOL], start, date(2001, 12, 31), fill_single_gaps=True)
+    a = annual_indicators(records, [], T, 2001, 2001, duplicates_by_year=q.duplicates_by_year)[0]
+    assert a.interpolated_days == 2
+    assert a.implausible_days == 1
+    assert a.duplicate_dates == 1
+    assert a.valid_days == 363
+    assert a.missing_days == 2
+
+
+def _seasonal_years(years: int = 5) -> list[float | None]:
+    start = date(2001, 1, 1)
+    end = date(2000 + years, 12, 31)
+    out: list[float | None] = []
+    d = start
+    i = 0
+    while d <= end:
+        out.append(30.0 + ((i * 7) % 5) * 0.5)  # 30.0 .. 32.0, deterministic spread
+        d += timedelta(days=1)
+        i += 1
+    return out
+
+
+def test_outlier_is_flagged_but_kept():
+    temps = _seasonal_years()
+    temps[400] = 45.0
+    start = date(2001, 1, 1)
+    dates = [(start + timedelta(days=i)).isoformat() for i in range(len(temps))]
+    records, _ = build_daily_series(dates, temps, start, date(2005, 12, 31))
+    flagged, n = flag_outliers(records)
+    assert n == 1
+    assert flagged[400].outlier and flagged[400].outlier_z > 4
+    assert flagged[400].tmax == 45.0
+    assert sum(r.tmax is not None for r in flagged) == len(records)
+
+
+def test_outlier_skips_small_windows_and_zero_mad():
+    records = series(date(2001, 1, 1), [COOL] * 10 + [50.0])
+    _, n = flag_outliers(records)
+    assert n == 0  # fewer than 30 values in the window
+    flat = series(date(2001, 1, 1), [COOL] * 365)
+    _, n = flag_outliers(flat)
+    assert n == 0  # MAD is zero

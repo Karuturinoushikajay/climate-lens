@@ -206,7 +206,9 @@ def build_pdf(r: AnalysisResponse) -> bytes:
             [
                 ["Baseline mode", r.baseline.mode.replace("_", " ")],
                 ["Baseline period", f"{r.baseline.reference_start_year}-{r.baseline.reference_end_year}"],
-                ["95th-percentile threshold", _fmt(r.baseline.threshold_c, 2, " °C")],
+                ["Threshold percentile", f"{r.hazard.percentile:g}th"],
+                ["Minimum consecutive hot days", r.hazard.min_duration_days],
+                [f"{r.hazard.percentile:g}th-percentile threshold", _fmt(r.baseline.threshold_c, 2, " °C")],
                 ["Percentile method", r.baseline.percentile_method],
                 ["Valid days used for threshold", r.baseline.valid_days_used],
             ],
@@ -284,6 +286,9 @@ def build_pdf(r: AnalysisResponse) -> bytes:
         ["Null values from provider", qa.null_values],
         [f"Implausible values (outside {q.plausible_range_c[0]:g} to {q.plausible_range_c[1]:g} °C)", qa.implausible_values],
         ["Duplicate dates", qa.duplicate_dates],
+        ["Interpolated days (gap fill)", qa.interpolated_days],
+        ["Statistical outlier days (flagged, kept)", qa.outlier_days],
+        ["Gap fill", q.gap_fill],
         ["Completeness", f"{qa.completeness * 100:.2f}%"],
         ["Minimum completeness for a year to enter trends", f"{q.min_year_completeness * 100:.0f}%"],
         ["Years excluded from trends", ", ".join(map(str, q.insufficient_years)) or "none"],
@@ -291,11 +296,28 @@ def build_pdf(r: AnalysisResponse) -> bytes:
     if q.reference:
         dq_rows.append(["Reference-period completeness", f"{q.reference.completeness * 100:.2f}%"])
     story.append(_table([[wrap(a), b] for a, b in dq_rows], [90 * mm, 84 * mm], header=False))
+    if q.outlier_method:
+        story.append(Spacer(1, 3))
+        story.append(P(f"Outlier method: {q.outlier_method}.", "small"))
+    if q.outlier_dates:
+        listed = "; ".join(f"{o.date} ({o.tmax_c:.1f} °C, z {o.robust_z:+.1f})" for o in q.outlier_dates)
+        story.append(P(f"Most extreme flagged days: {listed}.", "small"))
+
+    story.append(Paragraph("Annual data quality", s["h2"]))
+    rows = [["Year", "Valid", "Missing", "Interpolated", "Duplicates", "Implausible", "Outliers"]]
+    for a in r.annual:
+        rows.append([a.year, a.valid_days, a.missing_days, a.interpolated_days, a.duplicate_dates, a.implausible_days, a.outlier_days])
+    story.append(_table(rows))
 
     story.append(Paragraph("Methodology, limitations and statistical caveats", s["h2"]))
+    filled = (
+        "With the optional gap fill on, an isolated one-day gap between two observed days is set to their mean and flagged as interpolated; it never enters the threshold, completeness or annual mean."
+        if q.gap_fill != "off"
+        else "Nothing is interpolated or zero-filled."
+    )
     method = [
-        "Daily maximum 2 m air temperature is retrieved from the Open-Meteo Historical Weather API and aligned to a complete calendar. Missing dates, null values and implausible values are kept as missing; nothing is interpolated or zero-filled.",
-        "A hot day is a valid day whose maximum temperature is strictly greater than the threshold. A heatwave is a run of at least three consecutive hot days; any missing day breaks the run.",
+        "Daily maximum 2 m air temperature is retrieved from the Open-Meteo Historical Weather API and aligned to a complete calendar. Missing dates, null values and implausible values are kept as missing. " + filled,
+        f"A hot day is a valid day whose maximum temperature is strictly greater than the threshold. A heatwave is a run of at least {r.hazard.min_duration_days} consecutive hot days; any missing day breaks the run.",
         "Events are counted once, in the year they start. Heatwave days are attributed to the calendar year in which each day falls, and a year's longest event is the longest single-event contribution to that year.",
         "Percentage changes compare the mean of the first and last five qualifying years and are omitted when the early-period mean is zero.",
     ]

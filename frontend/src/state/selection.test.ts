@@ -42,6 +42,20 @@ describe('validateSelection', () => {
     const s = sel({ baseline: 'fixed_reference', referenceStartYear: 2000, referenceEndYear: 2004 })
     expect(validateSelection(s, 2025)).toContain('The reference period must span at least 10 years.')
   })
+
+  it('reports reversed reference years as an ordering error only', () => {
+    const errors = validateSelection(sel({ referenceStartYear: 2020, referenceEndYear: 1991 }), 2025)
+    expect(errors).toEqual(['Reference start year must not be after reference end year.'])
+  })
+
+  it('validates percentile and minimum days', () => {
+    expect(validateSelection(sel({ percentile: 96 }), 2025)).toContain('Percentile must be one of 90, 92.5, 95, 97.5, 99.')
+    for (const d of [1, 11, 2.5, NaN])
+      expect(validateSelection(sel({ minDurationDays: d }), 2025)).toContain(
+        'Minimum consecutive days must be a whole number from 2 to 10.',
+      )
+    expect(validateSelection(sel({ percentile: 99, minDurationDays: 10 }), 2025)).toEqual([])
+  })
 })
 
 describe('toQueryParams', () => {
@@ -62,7 +76,18 @@ describe('toQueryParams', () => {
       latitude: 17.385,
       longitude: 78.4867,
       label: 'Hyderabad',
+      percentile: 95,
+      min_duration_days: 3,
     })
+  })
+
+  it('sends hazard settings and fill_gaps only when on', () => {
+    expect(toQueryParams(sel({ percentile: 97.5, minDurationDays: 5 }))).toMatchObject({
+      percentile: 97.5,
+      min_duration_days: 5,
+    })
+    expect(toQueryParams(DEFAULT_SELECTION)).not.toHaveProperty('fill_gaps')
+    expect(toQueryParams(sel({ fillGaps: true })).fill_gaps).toBe('true')
   })
 
   it('builds box params with reference years', () => {

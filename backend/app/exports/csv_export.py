@@ -19,6 +19,10 @@ ANNUAL_COLUMNS = [
     ("valid_days", "Valid observation days"),
     ("expected_days", "Calendar days"),
     ("missing_days", "Missing days"),
+    ("interpolated_days", "Interpolated days (gap fill)"),
+    ("duplicate_dates", "Duplicate dates"),
+    ("implausible_days", "Implausible values"),
+    ("outlier_days", "Statistical outlier days (flagged, kept)"),
     ("completeness", "Completeness (fraction)"),
     ("sufficient_data", "Used in trend statistics"),
     ("heatwave_days_rolling_mean", "Heatwave days 5-yr rolling mean"),
@@ -49,6 +53,8 @@ def build_csv(result: AnalysisResponse) -> str:
     buf = io.StringIO()
     writer = csv.writer(buf, quoting=csv.QUOTE_MINIMAL, lineterminator="\r\n")
     r = result
+    dq = r.data_quality
+    qa = dq.analysis
     meta = [
         ("Region", r.region.label),
         ("Region type", r.region.kind),
@@ -56,12 +62,23 @@ def build_csv(result: AnalysisResponse) -> str:
         ("Longitude", r.region.longitude),
         ("Analysis period", f"{r.period.start_year}-{r.period.end_year}"),
         ("Hazard definition", r.hazard.definition),
+        ("Threshold percentile", r.hazard.percentile),
+        ("Minimum consecutive hot days", r.hazard.min_duration_days),
         ("Baseline mode", r.baseline.mode),
         ("Baseline period", f"{r.baseline.reference_start_year}-{r.baseline.reference_end_year}"),
-        ("95th percentile threshold (C)", r.baseline.threshold_c),
+        (f"{r.hazard.percentile:g}th percentile threshold (C)", r.baseline.threshold_c),
         ("Data source", f"{r.source.provider} - {r.source.dataset}"),
         ("Data retrieved at (UTC)", r.source.retrieved_at),
-        ("Analysis completeness (fraction)", r.data_quality.analysis.completeness),
+        ("Analysis completeness (fraction)", qa.completeness),
+        ("Calendar days", qa.expected_days),
+        ("Valid observed days", qa.valid_days),
+        ("Missing days", qa.missing_days),
+        ("Interpolated days", qa.interpolated_days),
+        ("Duplicate dates", qa.duplicate_dates),
+        ("Implausible values", qa.implausible_values),
+        ("Statistical outlier days (flagged, kept)", qa.outlier_days),
+        ("Gap fill", dq.gap_fill),
+        ("Outlier method", dq.outlier_method),
         ("Algorithm version", r.algorithm_version),
         ("Generated at (UTC)", r.generated_at),
     ]

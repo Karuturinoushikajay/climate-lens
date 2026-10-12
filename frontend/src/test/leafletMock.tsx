@@ -10,7 +10,15 @@ export function mapClick(lat: number, lng: number) {
   mapState.click({ latlng: { lat, lng } })
 }
 
-export const fakeMap = { setView: vi.fn(), fitBounds: vi.fn(), getZoom: () => 6 }
+const container = typeof document !== 'undefined' ? document.createElement('div') : null
+
+export const fakeMap = {
+  setView: vi.fn(),
+  fitBounds: vi.fn(),
+  getZoom: () => 6,
+  invalidateSize: vi.fn(),
+  getContainer: () => container,
+}
 
 export const leafletMock = {
   MapContainer: ({ children }: { children: ReactNode }) => <div data-testid="map">{children}</div>,

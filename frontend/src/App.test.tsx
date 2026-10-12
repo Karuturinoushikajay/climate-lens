@@ -16,17 +16,20 @@ const json = (body: unknown, status = 200, headers: Record<string, string> = {})
 function defaultAnalyze(url: URL): Promise<Response> {
   const p = url.searchParams
   const label = p.get('label') ?? `Point ${p.get('latitude')}, ${p.get('longitude')}`
-  return Promise.resolve(
-    json(
-      makeAnalysis(
-        label,
-        Number(p.get('latitude') ?? 0),
-        Number(p.get('longitude') ?? 0),
-        Number(p.get('start_year')),
-        Number(p.get('end_year')),
-      ),
-    ),
+  const body = makeAnalysis(
+    label,
+    Number(p.get('latitude') ?? 0),
+    Number(p.get('longitude') ?? 0),
+    Number(p.get('start_year')),
+    Number(p.get('end_year')),
   )
+  if (p.has('percentile')) body.hazard.percentile = Number(p.get('percentile'))
+  if (p.has('min_duration_days')) body.hazard.min_duration_days = Number(p.get('min_duration_days'))
+  if (p.get('fill_gaps') === 'true') {
+    body.data_quality.gap_fill = 'single-day linear'
+    body.data_quality.analysis.interpolated_days = 3
+  }
+  return Promise.resolve(json(body))
 }
 
 const PHOENIX = {
@@ -96,7 +99,8 @@ describe('App', () => {
     expect(screen.getByTestId('result-title')).toHaveTextContent('Hyderabad')
     expect(screen.getByTestId('metric-Heatwave events')).toHaveTextContent('7')
     expect(screen.getByTestId('metric-Heatwave days')).toHaveTextContent('31')
-    expect(screen.getByTestId('metric-95th pct threshold')).toHaveTextContent('39.9 °C')
+    expect(screen.getByTestId('metric-threshold')).toHaveTextContent('39.9 °C')
+    expect(screen.getByText('95th pct threshold')).toBeInTheDocument()
     expect(screen.getByText(/7 heatwave event\(s\) totalling 31 heatwave day\(s\)/)).toBeInTheDocument()
     expect(screen.getByTestId('mk-verdict-Annual heatwave days')).toHaveTextContent(
       'Increasing monotonic trend detected, with the significance criterion met.',
@@ -153,6 +157,13 @@ describe('App', () => {
     expect(screen.getByLabelText('North')).toHaveValue(19)
     expect(screen.getByLabelText('West')).toHaveValue(79)
     expect(screen.getByLabelText('East')).toHaveValue(80)
+  })
+
+  it('switching map mode re-measures the map so no blank strip remains', async () => {
+    const user = await renderLoaded()
+    fakeMap.invalidateSize.mockClear()
+    await user.click(screen.getByRole('button', { name: /lat-lon box/i }))
+    await waitFor(() => expect(fakeMap.invalidateSize).toHaveBeenCalled())
   })
 
   it('manual coordinate entry is debounced and never triggers analysis by itself', async () => {
@@ -332,6 +343,77 @@ describe('App', () => {
     await user.click(screen.getByRole('button', { name: /run analysis/i }))
     await waitFor(() => expect(screen.getByTestId('result-title')).toHaveTextContent('Delhi'))
     expect(screen.queryByText(/Downloaded/)).not.toBeInTheDocument()
+  })
+
+  it('sends percentile and minimum days, and labels results with them', async () => {
+    const user = await renderLoaded()
+    expect(lastAnalyze().get('percentile')).toBe('95')
+    expect(lastAnalyze().get('min_duration_days')).toBe('3')
+    expect(lastAnalyze().has('fill_gaps')).toBe(false)
+    expect(screen.getByTestId('result-hazard')).toHaveTextContent('95th percentile · 3+ days')
+
+    await user.selectOptions(screen.getByLabelText('Threshold percentile'), '90')
+    const days = screen.getByLabelText('Minimum consecutive days')
+    await user.clear(days)
+    await user.type(days, '2')
+    await user.click(screen.getByRole('button', { name: /run analysis/i }))
+    await waitFor(() => expect(lastAnalyze().get('percentile')).toBe('90'))
+    expect(lastAnalyze().get('min_duration_days')).toBe('2')
+    await waitFor(() => expect(screen.getByTestId('result-hazard')).toHaveTextContent('90th percentile · 2+ days'))
+    expect(screen.getByText('90th pct threshold')).toBeInTheDocument()
+  })
+
+  it('rejects minimum days outside 2-10', async () => {
+    const user = await renderLoaded()
+    const days = screen.getByLabelText('Minimum consecutive days')
+    await user.clear(days)
+    await user.type(days, '11')
+    expect(screen.getByText('Minimum consecutive days must be a whole number from 2 to 10.')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /run analysis/i })).toBeDisabled()
+  })
+
+  it('gap fill is off by default and sent only when ticked', async () => {
+    const user = await renderLoaded()
+    const box = screen.getByRole('checkbox', { name: /fill single-day gaps/i })
+    expect(box).not.toBeChecked()
+    expect(screen.getByTestId('dq-interpolated')).toHaveTextContent('0')
+    await user.click(box)
+    await user.click(screen.getByRole('button', { name: /run analysis/i }))
+    await waitFor(() => expect(lastAnalyze().get('fill_gaps')).toBe('true'))
+    await waitFor(() => expect(screen.getByTestId('dq-interpolated')).toHaveTextContent('3'))
+    expect(screen.getByTestId('result-hazard')).toHaveTextContent('single-day gaps filled')
+  })
+
+  it('shows the data quality report with counts, per-year flags and outliers', async () => {
+    const user = await renderLoaded()
+    const panel = screen.getByRole('region', { name: 'Data quality report' })
+    expect(within(panel).getByTestId('dq-missing')).toHaveTextContent('0')
+    expect(within(panel).getByTestId('dq-duplicate')).toHaveTextContent('0')
+    expect(within(panel).getByTestId('dq-implausible')).toHaveTextContent('0')
+    expect(within(panel).getByTestId('dq-outlier')).toHaveTextContent('2')
+    await user.click(within(panel).getByText(/Per-year breakdown \(1 year with flags\)/))
+    expect(within(panel).getAllByRole('row')).toHaveLength(2)
+    await user.click(within(panel).getByText(/Most extreme flagged days \(2\)/))
+    expect(within(panel).getByText(/12\.3 °C \(robust z -5\.2\)/)).toBeInTheDocument()
+  })
+
+  it('shows a limitations note linked to the sources list', async () => {
+    await renderLoaded()
+    const note = screen.getByTestId('limitations')
+    expect(note).toHaveTextContent('not from weather stations')
+    expect(note).toHaveTextContent('relative to this location')
+    expect(note).toHaveTextContent('not proof of a cause')
+    expect(within(note).getByRole('link', { name: /sources & limitations/i })).toHaveAttribute('href', '#limitations')
+    expect(document.getElementById('limitations')).not.toBeNull()
+  })
+
+  it('reversed reference years show the ordering error, not the span error', async () => {
+    const user = await renderLoaded()
+    await user.selectOptions(screen.getByLabelText('Reference start year'), '2020')
+    await user.selectOptions(screen.getByLabelText('Reference end year'), '1991')
+    expect(screen.getByText('Reference start year must not be after reference end year.')).toBeInTheDocument()
+    expect(screen.queryByText(/must span at least 10 years/)).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /run analysis/i })).toBeDisabled()
   })
 
   it('unsupported hazards are visible but disabled', async () => {

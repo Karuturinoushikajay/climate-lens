@@ -1,10 +1,11 @@
+import type { ReactNode } from 'react'
 import { CalendarRange, Flame, Thermometer, Timer, Gauge, Database } from 'lucide-react'
 import type { AnalysisResponse } from '../api/types'
 import { fmt, pct } from '../utils/format'
 
 export function SummaryCards({ data }: { data: AnalysisResponse }) {
   const s = data.summary
-  const cards = [
+  const cards: { icon: ReactNode; id?: string; label: string; value: string; sub: string; tone: string }[] = [
     {
       icon: <Flame size={18} />,
       label: 'Heatwave events',
@@ -28,9 +29,10 @@ export function SummaryCards({ data }: { data: AnalysisResponse }) {
     },
     {
       icon: <Thermometer size={18} />,
-      label: '95th pct threshold',
+      id: 'threshold',
+      label: `${data.hazard.percentile}th pct threshold`,
       value: fmt(data.baseline.threshold_c, 1, ' °C'),
-      sub: `Baseline ${data.baseline.reference_start_year}–${data.baseline.reference_end_year}`,
+      sub: `${data.hazard.min_duration_days}+ days · baseline ${data.baseline.reference_start_year}–${data.baseline.reference_end_year}`,
       tone: 'mint',
     },
     {
@@ -51,12 +53,12 @@ export function SummaryCards({ data }: { data: AnalysisResponse }) {
   return (
     <div className="cards" role="list" aria-label="Summary metrics">
       {cards.map((c) => (
-        <div key={c.label} className={`card tone-${c.tone}`} role="listitem">
+        <div key={c.id ?? c.label} className={`card tone-${c.tone}`} role="listitem">
           <div className="card-label">
             {c.icon}
             <span>{c.label}</span>
           </div>
-          <div className="card-value" data-testid={`metric-${c.label}`}>
+          <div className="card-value" data-testid={`metric-${c.id ?? c.label}`}>
             {c.value}
           </div>
           <div className="card-sub">{c.sub}</div>

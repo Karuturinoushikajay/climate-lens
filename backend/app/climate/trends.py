@@ -129,6 +129,24 @@ def mk_statement(mk: MannKendallResult) -> str:
     return f"{mk.interpretation} ({detail})."
 
 
+def _fmt_p(p: float) -> str:
+    if p < 0.001:
+        return "p < 0.001"
+    return f"p = {p:.3f}" if p < 0.01 else f"p = {p:.2f}"
+
+
+def hedge(mk: MannKendallResult) -> str:
+    """Parenthetical significance qualifier for a headline change, from the Mann-Kendall test."""
+    if mk.p_value is None:
+        return "(significance not testable: too few usable years)"
+    if mk.significant:
+        return (
+            f"(statistically significant, {_fmt_p(mk.p_value)}; an association in this record, "
+            "not proof of a long-term trend)"
+        )
+    return f"(not statistically significant, {_fmt_p(mk.p_value)} after serial-correlation adjustment)"
+
+
 def build_insights(
     label: str,
     start_year: int,
@@ -140,8 +158,13 @@ def build_insights(
     days_mk: MannKendallResult,
     events_mk: MannKendallResult,
     excluded_years: Sequence[int],
+    tmax_change: PercentChange | None = None,
+    tmax_mk: MannKendallResult | None = None,
 ) -> list[str]:
-    """Plain-language statements derived only from computed values."""
+    """Plain-language statements derived only from computed values.
+
+    Every headline change carries the Mann-Kendall significance of the same indicator.
+    """
     insights: list[str] = [
         f"{label}: {total_events} heatwave event(s) totalling {total_days} heatwave day(s) "
         f"were detected between {start_year} and {end_year}."
@@ -153,7 +176,8 @@ def build_insights(
             verb = "higher" if c.percent_change > 0 else "lower"
             insights.append(
                 f"Average annual heatwave days in {c.last_period} ({c.last_mean:.1f}) were "
-                f"{abs(c.percent_change):.0f}% {verb} than in {c.first_period} ({c.first_mean:.1f})."
+                f"{abs(c.percent_change):.0f}% {verb} than in {c.first_period} ({c.first_mean:.1f}) "
+                f"{hedge(days_mk)}."
             )
         elif c.percent_change == 0:
             insights.append(
@@ -163,7 +187,7 @@ def build_insights(
         else:
             insights.append(
                 f"Average annual heatwave days moved from {c.first_mean:.1f} ({c.first_period}) to "
-                f"{c.last_mean:.1f} ({c.last_period}). {c.note}"
+                f"{c.last_mean:.1f} ({c.last_period}) {hedge(days_mk)}. {c.note}"
             )
     elif c.note:
         insights.append(c.note)
@@ -172,8 +196,15 @@ def build_insights(
     if r.slope is not None:
         insights.append(
             f"The fitted linear slope of annual heatwave days is {r.slope * 10:+.2f} days per decade"
-            + (f" (R² = {r.r_squared:.2f})." if r.r_squared is not None else " (constant series).")
-            + " This describes the observed record and is not a forecast."
+            + (f" (R² = {r.r_squared:.2f})" if r.r_squared is not None else " (constant series)")
+            + f" {hedge(days_mk)}. This describes the observed record and is not a forecast."
+        )
+
+    t = tmax_change
+    if t is not None and tmax_mk is not None and t.absolute_change is not None:
+        insights.append(
+            f"Annual mean daily maximum temperature changed by {t.absolute_change:+.2f} °C between "
+            f"{t.first_period} and {t.last_period} {hedge(tmax_mk)}."
         )
 
     insights.append(f"Mann-Kendall (heatwave days): {mk_statement(days_mk)}")

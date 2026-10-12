@@ -7,7 +7,11 @@ than the 95th-percentile threshold.
 Conventions:
 * The daily series is rebuilt on a complete calendar index. Dates missing from the provider,
   null values and physically implausible values are all treated as missing.
-* A missing day always breaks a run; missing values are never interpolated or zero-filled.
+* A missing day breaks a run and is never zero-filled. Only when the caller opts in, an isolated
+  one-day gap between two observed days is filled with their mean; such days are flagged
+  "interpolated", counted, and never used for the percentile threshold.
+* Statistical outliers (robust z-score against the same time of year) are flagged and counted
+  but kept, because genuine heat extremes are also unusual.
 * An event is counted once, in the calendar year in which it starts.
 * Its hot days are attributed to the calendar year in which each day falls.
 * A year's "longest event" is the longest contribution any single event makes to that year.
@@ -17,7 +21,7 @@ from __future__ import annotations
 
 import math
 from collections import Counter
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date, timedelta
 from typing import Iterable, Sequence
 
@@ -25,13 +29,30 @@ import numpy as np
 
 PLAUSIBLE_TMAX_RANGE_C = (-60.0, 60.0)
 PERCENTILE_METHOD = "linear"  # numpy default, Hyndman & Fan type 7
+OUTLIER_Z = 4.0
+OUTLIER_WINDOW_DAYS = 15
+OUTLIER_MIN_SAMPLES = 30
+OUTLIER_METHOD = (
+    f"robust z-score |0.6745*(x - median)/MAD| > {OUTLIER_Z:g}, against all observed values within "
+    f"±{OUTLIER_WINDOW_DAYS} calendar days of the same date in the period; flagged, not removed"
+)
 
 
 @dataclass(frozen=True)
 class DailyRecord:
     day: date
     tmax: float | None
-    flag: str  # "ok" | "missing_date" | "null" | "implausible"
+    flag: str  # "ok" | "missing_date" | "null" | "implausible" | "interpolated"
+    outlier_z: float | None = None
+    filled_from: str | None = None  # original flag of an interpolated day
+
+    @property
+    def observed(self) -> bool:
+        return self.flag == "ok"
+
+    @property
+    def outlier(self) -> bool:
+        return self.outlier_z is not None
 
 
 @dataclass
@@ -44,6 +65,9 @@ class DataQuality:
     implausible_values: int
     duplicate_dates: int
     out_of_range_dates: int
+    interpolated_days: int = 0
+    outlier_days: int = 0
+    duplicates_by_year: dict[int, int] = field(default_factory=dict)
 
     @property
     def missing_days(self) -> int:
@@ -83,6 +107,10 @@ class AnnualIndicator:
     missing_days: int
     completeness: float
     sufficient_data: bool
+    interpolated_days: int = 0
+    duplicate_dates: int = 0
+    implausible_days: int = 0
+    outlier_days: int = 0
 
 
 def _is_finite_number(value: object) -> bool:
@@ -95,8 +123,13 @@ def build_daily_series(
     start: date,
     end: date,
     plausible_range: tuple[float, float] = PLAUSIBLE_TMAX_RANGE_C,
+    fill_single_gaps: bool = False,
 ) -> tuple[list[DailyRecord], DataQuality]:
-    """Align provider output to a complete calendar from ``start`` to ``end`` inclusive."""
+    """Align provider output to a complete calendar from ``start`` to ``end`` inclusive.
+
+    ``valid_days`` and completeness count observed values only; filled days are reported
+    separately as ``interpolated_days``.
+    """
     if len(dates) != len(values):
         raise ValueError("dates and values must have equal length")
     if end < start:
@@ -136,17 +169,80 @@ def build_daily_series(
                 records.append(DailyRecord(current, float(raw), "ok"))
         current += timedelta(days=1)
 
+    interpolated = 0
+    if fill_single_gaps:
+        for i in range(1, len(records) - 1):
+            prev, cur, nxt = records[i - 1], records[i], records[i + 1]
+            if cur.tmax is None and prev.observed and nxt.observed:
+                mean = round((prev.tmax + nxt.tmax) / 2, 2)  # type: ignore[operator]
+                records[i] = DailyRecord(cur.day, mean, "interpolated", filled_from=cur.flag)
+                interpolated += 1
+
+    duplicates_by_year: Counter[int] = Counter()
+    for day, c in counts.items():
+        if c > 1:
+            duplicates_by_year[day.year] += c - 1
+
     quality = DataQuality(
         expected_days=len(records),
         provided_days=sum(counts.values()),
-        valid_days=sum(1 for r in records if r.tmax is not None),
+        valid_days=sum(1 for r in records if r.observed),
         missing_dates=missing_dates,
         null_values=null_values,
         implausible_values=implausible,
-        duplicate_dates=sum(c - 1 for c in counts.values() if c > 1),
+        duplicate_dates=sum(duplicates_by_year.values()),
         out_of_range_dates=out_of_range,
+        interpolated_days=interpolated,
+        duplicates_by_year=dict(duplicates_by_year),
     )
     return records, quality
+
+
+def _day_of_year(d: date) -> int:
+    """Day of year on a fixed 365-day calendar (29 February shares 28 February's slot)."""
+    doy = d.timetuple().tm_yday
+    leap = d.year % 4 == 0 and (d.year % 100 != 0 or d.year % 400 == 0)
+    return doy - 1 if leap and doy > 59 else doy
+
+
+def flag_outliers(
+    records: Sequence[DailyRecord],
+    z_limit: float = OUTLIER_Z,
+    window: int = OUTLIER_WINDOW_DAYS,
+    min_samples: int = OUTLIER_MIN_SAMPLES,
+) -> tuple[list[DailyRecord], int]:
+    """Flag observed days far from the typical value for that time of year.
+
+    Each observed value is compared with the median and MAD of all observed values within
+    ``window`` days of the same calendar date (wrapping over the year end). Windows with fewer
+    than ``min_samples`` values or zero MAD are skipped rather than guessed.
+    """
+    idx = [i for i, r in enumerate(records) if r.observed]
+    if not idx:
+        return list(records), 0
+    doy = np.array([_day_of_year(records[i].day) for i in idx])
+    vals = np.array([records[i].tmax for i in idx], dtype=float)
+    z = np.full(len(idx), np.nan)
+    for d in np.unique(doy):
+        dist = np.abs(doy - d)
+        in_window = np.minimum(dist, 365 - dist) <= window
+        sample = vals[in_window]
+        if sample.size < min_samples:
+            continue
+        median = np.median(sample)
+        mad = np.median(np.abs(sample - median))
+        if mad == 0:
+            continue
+        here = doy == d
+        z[here] = 0.6745 * (vals[here] - median) / mad
+
+    out = list(records)
+    flagged = 0
+    for k, i in enumerate(idx):
+        if np.isfinite(z[k]) and abs(z[k]) > z_limit:
+            out[i] = replace(out[i], outlier_z=round(float(z[k]), 2))
+            flagged += 1
+    return out, flagged
 
 
 def percentile_threshold(values: Iterable[float | None], percentile: float = 95.0) -> float | None:
@@ -214,8 +310,13 @@ def annual_indicators(
     start_year: int,
     end_year: int,
     min_completeness: float = 0.8,
+    duplicates_by_year: dict[int, int] | None = None,
 ) -> list[AnnualIndicator]:
-    """Aggregate daily records and events into per-calendar-year indicators."""
+    """Aggregate daily records and events into per-calendar-year indicators.
+
+    Completeness, mean and maximum use observed values only; interpolated days can still
+    complete a heatwave run and are counted per year.
+    """
     by_year: dict[int, list[DailyRecord]] = {y: [] for y in range(start_year, end_year + 1)}
     for r in records:
         if r.day.year in by_year:
@@ -241,7 +342,7 @@ def annual_indicators(
     for year in range(start_year, end_year + 1):
         rows = by_year[year]
         expected = (date(year, 12, 31) - date(year, 1, 1)).days + 1
-        valid = [r.tmax for r in rows if r.tmax is not None]
+        valid = [r.tmax for r in rows if r.observed]
         completeness = len(valid) / expected
         days = hw_days.get(year, 0)
         result.append(
@@ -258,6 +359,10 @@ def annual_indicators(
                 missing_days=expected - len(valid),
                 completeness=completeness,
                 sufficient_data=completeness >= min_completeness,
+                interpolated_days=sum(1 for r in rows if r.flag == "interpolated"),
+                duplicate_dates=(duplicates_by_year or {}).get(year, 0),
+                implausible_days=sum(1 for r in rows if "implausible" in (r.flag, r.filled_from)),
+                outlier_days=sum(1 for r in rows if r.outlier),
             )
         )
     return result

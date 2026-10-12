@@ -173,6 +173,21 @@ tbody tr:hover { background: #18241f; }
 tr.insufficient { color: var(--muted); }
 .badge { margin-left: 6px; font-size: 0.7rem; padding: 1px 6px; border-radius: 999px; background: var(--amber-dim); color: var(--amber); }
 
+.dq-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.dq-counts { list-style: none; margin: 12px 0 0; padding: 0; display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; }
+.dq-counts li { background: var(--panel-2); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 2px; }
+.dq-counts li .fine { margin: 0; }
+.dq-value { font-size: 1.3rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.dq-counts li.has-issues .dq-value { color: var(--amber); }
+.dq-label { font-size: 0.82rem; }
+.dq-years, .dq-outliers { margin-top: 10px; font-size: 0.85rem; }
+.dq-years summary, .dq-outliers summary { cursor: pointer; color: var(--text); }
+.dq-outliers ul { margin: 6px 0 0; padding-left: 20px; color: var(--muted); columns: 2; }
+.checkbox { align-items: flex-start; }
+.checkbox input { margin-top: 3px; }
+.limitations { background: #1c2622; border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px; font-size: 0.85rem; color: var(--muted); }
+.limitations strong { color: var(--text); }
+.limitations a { color: var(--mint); }
 .disclaimer ul { margin: 8px 0 0; padding-left: 20px; color: var(--muted); font-size: 0.85rem; }
 .footer { text-align: center; color: var(--muted); font-size: 0.75rem; padding: 20px; border-top: 1px solid var(--border); margin-top: 24px; }
 
@@ -182,6 +197,7 @@ tr.insufficient { color: var(--muted); }
 
 @media (max-width: 1100px) {
   .cards { grid-template-columns: repeat(3, 1fr); }
+  .dq-counts { grid-template-columns: repeat(3, 1fr); }
   .two-col { grid-template-columns: 1fr; }
 }
 @media (max-width: 860px) {
@@ -191,7 +207,8 @@ tr.insufficient { color: var(--muted); }
 }
 @media (max-width: 520px) {
   main { padding: 12px; }
-  .cards { grid-template-columns: repeat(2, 1fr); }
+  .cards, .dq-counts { grid-template-columns: repeat(2, 1fr); }
+  .dq-outliers ul { columns: 1; }
   .card-value { font-size: 1.3rem; }
   .topbar { padding: 10px 12px; }
   .status-pill { display: none; }

@@ -13,13 +13,16 @@ from typing import Any
 from ..cache import CacheStore, make_key
 from ..climate import ALGORITHM_VERSION
 from ..climate.heatwave import (
+    OUTLIER_METHOD,
     PERCENTILE_METHOD,
     PLAUSIBLE_TMAX_RANGE_C,
     AnnualIndicator,
+    DailyRecord,
     DataQuality,
     annual_indicators,
     build_daily_series,
     detect_events,
+    flag_outliers,
     percentile_threshold,
 )
 from ..climate.mann_kendall import MannKendallResult, mann_kendall
@@ -45,6 +48,7 @@ from ..models.schemas import (
     HazardOut,
     IndicatorTrendOut,
     MannKendallOut,
+    OutlierDay,
     PeriodChangeOut,
     PeriodOut,
     QualityBlock,
@@ -59,9 +63,8 @@ from .weather import ATTRIBUTION, DATASET, MODEL, PROVIDER, VARIABLE, OpenMeteoC
 
 logger = logging.getLogger(__name__)
 
-PERCENTILE = 95.0
-MIN_DURATION_DAYS = 3
 ROLLING_WINDOW_YEARS = 5
+MAX_OUTLIER_DATES = 20
 OBSERVATION_SCHEMA = "obs-v1"
 
 
@@ -91,8 +94,14 @@ def _quality_block(q: DataQuality) -> QualityBlock:
         null_values=q.null_values,
         implausible_values=q.implausible_values,
         duplicate_dates=q.duplicate_dates,
+        interpolated_days=q.interpolated_days,
+        outlier_days=q.outlier_days,
         completeness=round(q.completeness, 6),
     )
+
+
+def _observed(records: list[DailyRecord]):
+    return (r.tmax for r in records if r.observed)
 
 
 def _regression_out(r: RegressionResult) -> RegressionOut:
@@ -215,13 +224,17 @@ class AnalysisService:
         a_series, r_series, obs_status = self._fetch_ranges(points, q)
         a_start, a_end = date(q.start_year, 1, 1), date(q.end_year, 12, 31)
 
-        records, quality = build_daily_series(a_series.dates, a_series.tmax, a_start, a_end)
+        records, quality = build_daily_series(
+            a_series.dates, a_series.tmax, a_start, a_end, fill_single_gaps=q.fill_gaps
+        )
+        records, quality.outlier_days = flag_outliers(records)
 
         ref_quality: DataQuality | None = None
         if q.baseline == "fixed_reference" and r_series is not None:
             r_start, r_end = date(q.reference_start_year, 1, 1), date(q.reference_end_year, 12, 31)
             ref_records, ref_quality = build_daily_series(r_series.dates, r_series.tmax, r_start, r_end)
-            threshold = percentile_threshold((r.tmax for r in ref_records), PERCENTILE)
+            ref_records, ref_quality.outlier_days = flag_outliers(ref_records)
+            threshold = percentile_threshold(_observed(ref_records), q.percentile)
             threshold_days = ref_quality.valid_days
             baseline_note = (
                 f"Threshold computed from {q.reference_start_year}-{q.reference_end_year} observations and applied "
@@ -229,7 +242,7 @@ class AnalysisService:
             )
             ref_years = (q.reference_start_year, q.reference_end_year)
         else:
-            threshold = percentile_threshold((r.tmax for r in records), PERCENTILE)
+            threshold = percentile_threshold(_observed(records), q.percentile)
             threshold_days = quality.valid_days
             baseline_note = (
                 f"Threshold computed from the selected analysis period ({q.start_year}-{q.end_year}); "
@@ -237,10 +250,17 @@ class AnalysisService:
             )
             ref_years = (q.start_year, q.end_year)
 
-        events = detect_events(records, threshold, MIN_DURATION_DAYS) if threshold is not None else []
+        events = detect_events(records, threshold, q.min_duration_days) if threshold is not None else []
         annual = annual_indicators(
-            records, events, threshold, q.start_year, q.end_year, self.settings.min_year_completeness
+            records,
+            events,
+            threshold,
+            q.start_year,
+            q.end_year,
+            self.settings.min_year_completeness,
+            duplicates_by_year=quality.duplicates_by_year,
         )
+        outliers = sorted((r for r in records if r.outlier), key=lambda r: -abs(r.outlier_z or 0))[:MAX_OUTLIER_DATES]
 
         label = q.label or self._default_label(q)
         trends, raw_trends = self._trends(annual)
@@ -258,6 +278,8 @@ class AnalysisService:
                 days_mk,
                 raw_trends["event_count"][1],
                 summary.excluded_years,
+                tmax_change=raw_trends["mean_tmax"][2],
+                tmax_mk=raw_trends["mean_tmax"][1],
             )
         else:
             insights = ["No valid temperature observations were available, so no heatwave analysis could be performed."]
@@ -275,11 +297,11 @@ class AnalysisService:
             hazard=HazardOut(
                 type="heatwave",
                 definition=(
-                    f"At least {MIN_DURATION_DAYS} consecutive valid days with daily maximum temperature strictly "
-                    f"greater than the {PERCENTILE:g}th-percentile threshold."
+                    f"At least {q.min_duration_days} consecutive valid days with daily maximum temperature strictly "
+                    f"greater than the {q.percentile:g}th-percentile threshold."
                 ),
-                percentile=PERCENTILE,
-                min_duration_days=MIN_DURATION_DAYS,
+                percentile=q.percentile,
+                min_duration_days=q.min_duration_days,
                 comparison="strictly greater than",
             ),
             baseline=BaselineOut(
@@ -326,6 +348,12 @@ class AnalysisService:
                 min_year_completeness=self.settings.min_year_completeness,
                 insufficient_years=[a.year for a in annual if not a.sufficient_data],
                 plausible_range_c=list(PLAUSIBLE_TMAX_RANGE_C),
+                gap_fill="single-day linear" if q.fill_gaps else "off",
+                outlier_method=OUTLIER_METHOD,
+                outlier_dates=[
+                    OutlierDay(date=r.day.isoformat(), tmax_c=round(r.tmax, 2), robust_z=r.outlier_z)  # type: ignore[arg-type]
+                    for r in outliers
+                ],
             ),
             insights=insights,
             caveats=self._caveats(q, threshold),
@@ -339,8 +367,9 @@ class AnalysisService:
         params: dict[str, Any] = {
             "algorithm_version": ALGORITHM_VERSION,
             "hazard": q.hazard,
-            "percentile": PERCENTILE,
-            "min_duration_days": MIN_DURATION_DAYS,
+            "percentile": q.percentile,
+            "min_duration_days": q.min_duration_days,
+            "fill_gaps": q.fill_gaps,
             "points": [list(p) for p in points],
             "start_year": q.start_year,
             "end_year": q.end_year,
@@ -390,7 +419,7 @@ class AnalysisService:
 
     @staticmethod
     def _summary(records, events, annual: list[AnnualIndicator]) -> SummaryOut:
-        valid = [r.tmax for r in records if r.tmax is not None]
+        valid = list(_observed(records))
         longest = max(events, key=lambda e: e.duration_days, default=None)
         years = len(annual)
         used = [a for a in annual if a.sufficient_data]
@@ -431,6 +460,10 @@ class AnalysisService:
                 missing_days=a.missing_days,
                 completeness=round(a.completeness, 4),
                 sufficient_data=a.sufficient_data,
+                interpolated_days=a.interpolated_days,
+                duplicate_dates=a.duplicate_dates,
+                implausible_days=a.implausible_days,
+                outlier_days=a.outlier_days,
                 heatwave_days_rolling_mean=round(dr, 3) if dr is not None else None,
                 event_count_rolling_mean=round(cr, 3) if cr is not None else None,
             )
@@ -479,14 +512,27 @@ class AnalysisService:
             "uncorrected values are reported alongside. Three indicators are tested without a multiple-testing "
             "correction.",
             "A non-significant result does not prove the absence of a trend, and neither test establishes causation.",
-            "Missing observations are never interpolated or zero-filled; any missing day breaks a heatwave run, which "
-            "can under-count events in incomplete years.",
+            f"Percentile thresholds are relative to this location's own climate: the {q.percentile:g}th percentile "
+            "here is a different temperature from the same percentile elsewhere.",
+            "Statistical outliers are flagged for review but kept in the analysis, because genuine heat extremes "
+            "are also unusual.",
         ]
+        if q.fill_gaps:
+            caveats.append(
+                "Single-day gap fill is on: an isolated missing day between two observed days is set to their mean, "
+                "flagged as interpolated, and can complete a heatwave run. Interpolated days are never used for the "
+                "threshold, completeness, or annual mean and maximum."
+            )
+        else:
+            caveats.append(
+                "Missing observations are never interpolated or zero-filled; any missing day breaks a heatwave run, "
+                "which can under-count events in incomplete years."
+            )
         if q.baseline == "analysis_period":
             caveats.insert(
                 0,
-                "The 95th-percentile threshold is derived from the selected analysis period, so results for different "
-                "periods use different thresholds and should not be compared directly.",
+                f"The {q.percentile:g}th-percentile threshold is derived from the selected analysis period, so results "
+                "for different periods use different thresholds and should not be compared directly.",
             )
         if threshold is None:
             caveats.insert(0, "No valid observations were available to compute a threshold.")

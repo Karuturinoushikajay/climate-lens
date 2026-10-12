@@ -88,6 +88,48 @@ def test_missing_values_reported_and_not_zero_filled(make_client, mock_api):
     assert body["data_quality"]["analysis"]["null_values"] == 10
     y2000 = next(a for a in body["annual"] if a["year"] == 2000)
     assert y2000["missing_days"] == 10 and y2000["valid_days"] == 356
+    assert body["data_quality"]["analysis"]["interpolated_days"] == 0
+    assert body["data_quality"]["gap_fill"] == "off"
+
+
+def test_fill_gaps_is_opt_in_flagged_and_keyed(make_client, mock_api):
+    nulls = {date(2000, 6, 5), date(2001, 7, 1), date(2001, 7, 2)}
+    mock_api.get(ARCHIVE_URL).mock(side_effect=open_meteo_handler(nulls))
+    client = make_client()
+    off = client.get("/api/analyze", params=q(start_year=2000, end_year=2005)).json()
+    on = client.get("/api/analyze", params=q(start_year=2000, end_year=2005, fill_gaps="true")).json()
+    assert on["cache"]["analysis"] == "miss" and on["cache"]["observations"] == "hit"
+    assert off["data_quality"]["analysis"]["interpolated_days"] == 0
+    dq = on["data_quality"]
+    assert dq["analysis"]["interpolated_days"] == 1  # the two-day gap stays missing
+    assert dq["gap_fill"] == "single-day linear"
+    assert dq["analysis"]["valid_days"] == off["data_quality"]["analysis"]["valid_days"]
+    y2000 = next(a for a in on["annual"] if a["year"] == 2000)
+    assert y2000["interpolated_days"] == 1 and y2000["missing_days"] == 1
+    assert on["request"]["fill_gaps"] is True
+    assert on["baseline"]["threshold_c"] == off["baseline"]["threshold_c"]
+    assert any("gap fill is on" in c for c in on["caveats"])
+
+
+def test_quality_reports_outliers_and_method(client, mock_api):
+    dq = client.get("/api/analyze", params=q(start_year=2000, end_year=2005)).json()["data_quality"]
+    assert "MAD" in dq["outlier_method"]
+    assert dq["analysis"]["outlier_days"] == len(dq["outlier_dates"]) or len(dq["outlier_dates"]) == 20
+    assert all(abs(o["robust_z"]) > 4 for o in dq["outlier_dates"])
+
+
+def test_configurable_percentile_and_duration(client, mock_api):
+    base = q(start_year=2000, end_year=2010)
+    p90 = client.get("/api/analyze", params={**base, "percentile": 90, "min_duration_days": 2}).json()
+    p99 = client.get("/api/analyze", params={**base, "percentile": 99, "min_duration_days": 5}).json()
+    assert p90["hazard"]["percentile"] == 90 and p90["hazard"]["min_duration_days"] == 2
+    assert p99["hazard"]["percentile"] == 99 and p99["hazard"]["min_duration_days"] == 5
+    assert p90["baseline"]["threshold_c"] < p99["baseline"]["threshold_c"]
+    assert all(e["duration_days"] >= 2 for e in p90["events"])
+    assert all(e["duration_days"] >= 5 for e in p99["events"])
+    assert p90["summary"]["total_heatwave_days"] > p99["summary"]["total_heatwave_days"]
+    assert "90th-percentile" in p90["hazard"]["definition"] and "At least 2" in p90["hazard"]["definition"]
+    assert p99["cache"]["analysis"] == "miss"
 
 
 @pytest.mark.parametrize(
@@ -103,6 +145,14 @@ def test_missing_values_reported_and_not_zero_filled(make_client, mock_api):
         (q(south=10, west=70, north=12, east=72), "not both"),
         (q(baseline="fixed_reference", reference_start_year=2000, reference_end_year=2003), "at least 10 years"),
         (q(label="x" * 300), "label"),
+        (q(percentile=96), "percentile must be one of 90, 92.5, 95, 97.5, 99"),
+        (q(percentile="abc"), "percentile"),
+        (q(min_duration_days=1), "min_duration_days"),
+        (q(min_duration_days=11), "min_duration_days"),
+        (
+            q(baseline="fixed_reference", reference_start_year=2020, reference_end_year=1991),
+            "reference_start_year must not be after reference_end_year",
+        ),
     ],
 )
 def test_validation_errors(client, mock_api, params, fragment):
@@ -392,6 +442,33 @@ def test_csv_export(client):
     assert [int(x["Year"]) for x in rows] == list(range(2000, 2011))
     assert any("Hyderabad" in m for m in meta)
     assert {"Heatwave days", "Heatwave events (counted in start year)", "Missing days"} <= set(rows[0])
+    assert {"Interpolated days (gap fill)", "Duplicate dates", "Implausible values"} <= set(rows[0])
+    assert "Statistical outlier days (flagged, kept)" in rows[0]
+    assert "#,95th percentile threshold (C)," in "\n".join(meta)
+    assert "#,Gap fill,off" in meta
+
+
+def test_exports_follow_configured_hazard(make_client, mock_api):
+    nulls = {date(2001, 7, 1)}
+    mock_api.get(ARCHIVE_URL).mock(side_effect=open_meteo_handler(nulls))
+    c = make_client()
+    params = q(start_year=2000, end_year=2005, percentile=90, min_duration_days=2, fill_gaps="true")
+    rows, meta = _parse_csv(c.get("/api/export.csv", params=params).text)
+    joined = "\n".join(meta)
+    assert "#,Threshold percentile,90.0" in joined
+    assert "#,Minimum consecutive hot days,2" in joined
+    assert "#,90th percentile threshold (C)," in joined
+    assert "#,Interpolated days,1" in joined
+    assert "#,Gap fill,single-day linear" in joined
+    assert sum(int(r["Interpolated days (gap fill)"]) for r in rows) == 1
+
+    pdf = c.get("/api/export.pdf", params=params).content
+    text = " ".join(" ".join(p.extract_text() for p in PdfReader(io.BytesIO(pdf)).pages).split())
+    assert "90th-percentile threshold" in text
+    assert "Minimum consecutive hot days 2" in text
+    assert "Interpolated days (gap fill) 1" in text
+    assert "Annual data quality" in text
+    assert "at least 2 consecutive hot days" in text
 
 
 def test_csv_formula_injection_is_neutralised(client):

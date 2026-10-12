@@ -64,6 +64,23 @@ function ClickHandler({
   return null
 }
 
+// Leaflet measures its container once; re-measure when the layout around it changes height.
+function SizeWatcher({ mode }: { mode: SelectMode }) {
+  const map = useMap()
+  useEffect(() => {
+    const el = map.getContainer()
+    if (typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(() => map.invalidateSize())
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [map])
+  useEffect(() => {
+    const id = requestAnimationFrame(() => map.invalidateSize())
+    return () => cancelAnimationFrame(id)
+  }, [map, mode])
+  return null
+}
+
 function FocusController({ location, focusToken }: { location: Location; focusToken: number }) {
   const map = useMap()
   const last = useRef(-1)
@@ -159,6 +176,7 @@ export function MapPanel({ location, label, mode, onModeChange, onSelect, focusT
             disabled={disabled}
           />
           <FocusController location={location} focusToken={focusToken} />
+          <SizeWatcher mode={mode} />
           {location.kind === 'point' ? (
             <CircleMarker
               center={[location.latitude, location.longitude]}

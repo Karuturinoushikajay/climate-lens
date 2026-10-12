@@ -3,7 +3,10 @@ import { Loader2, Play } from 'lucide-react'
 import type { PresetRegion } from '../api/types'
 import {
   MAX_LABEL_LENGTH,
+  MAX_RUN_DAYS,
+  MIN_RUN_DAYS,
   MIN_YEAR,
+  PERCENTILE_OPTIONS,
   describeLocation,
   sameLocation,
   validateLocation,
@@ -199,6 +202,39 @@ export function ControlsPanel({
 
       <div className="coord-grid">
         <label className="field">
+          <span>
+            Threshold percentile{' '}
+            <InfoTip text="A hot day is warmer than this percentile of daily maximum temperatures for the location. Higher percentiles find rarer, more extreme heat." />
+          </span>
+          <select
+            value={selection.percentile}
+            aria-label="Threshold percentile"
+            onChange={(e) => onChange({ percentile: Number(e.target.value) })}
+          >
+            {PERCENTILE_OPTIONS.map((p) => (
+              <option key={p} value={p}>
+                {p}th
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          <span>Min. consecutive days</span>
+          <input
+            type="number"
+            inputMode="numeric"
+            min={MIN_RUN_DAYS}
+            max={MAX_RUN_DAYS}
+            step={1}
+            value={Number.isNaN(selection.minDurationDays) ? '' : selection.minDurationDays}
+            aria-label="Minimum consecutive days"
+            onChange={(e) => onChange({ minDurationDays: e.target.value === '' ? NaN : Number(e.target.value) })}
+          />
+        </label>
+      </div>
+
+      <div className="coord-grid">
+        <label className="field">
           <span>Start year</span>
           <select
             value={selection.startYear}
@@ -223,7 +259,7 @@ export function ControlsPanel({
       <fieldset className="field baseline">
         <legend>
           Percentile baseline{' '}
-          <InfoTip text="The 95th-percentile threshold can come from the analysis period itself or from a fixed reference period (e.g. 1991-2020). Results from different baselines are not directly comparable." />
+          <InfoTip text="The percentile threshold can come from the analysis period itself or from a fixed reference period (e.g. 1991-2020). Results from different baselines are not directly comparable." />
         </legend>
         {(['fixed_reference', 'analysis_period'] as BaselineMode[]).map((mode) => (
           <label key={mode} className="radio">
@@ -266,6 +302,16 @@ export function ControlsPanel({
           </div>
         )}
       </fieldset>
+
+      <label className="radio checkbox">
+        <input
+          type="checkbox"
+          checked={selection.fillGaps}
+          onChange={(e) => onChange({ fillGaps: e.target.checked })}
+        />
+        Fill single-day gaps (interpolated, flagged){' '}
+        <InfoTip text="Off by default. When on, an isolated missing day between two observed days is set to their mean so it does not break a heatwave run. Filled days are counted in the data-quality report and never used for the threshold." />
+      </label>
 
       {errors.length > 0 && (
         <ul className="field-error" role="alert">

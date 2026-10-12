@@ -16,6 +16,8 @@ from ..config import (
 )
 
 SUPPORTED_HAZARDS = ("heatwave",)
+ALLOWED_PERCENTILES = (90.0, 92.5, 95.0, 97.5, 99.0)
+MIN_RUN_DAYS, MAX_RUN_DAYS = 2, 10
 BaselineMode = Literal["analysis_period", "fixed_reference"]
 
 
@@ -47,6 +49,20 @@ class AnalysisQuery(BaseModel):
     )
     reference_start_year: int = Field(1991, description="Reference period start (fixed_reference only)")
     reference_end_year: int = Field(2020, description="Reference period end (fixed_reference only)")
+    percentile: float = Field(95.0, description=f"Heatwave threshold percentile; one of {', '.join(f'{p:g}' for p in ALLOWED_PERCENTILES)}")
+    min_duration_days: int = Field(
+        3, ge=MIN_RUN_DAYS, le=MAX_RUN_DAYS, description="Minimum number of consecutive hot days that make a heatwave"
+    )
+    fill_gaps: bool = Field(
+        False, description="Fill isolated one-day gaps with the mean of the neighbouring days (flagged and counted)"
+    )
+
+    @field_validator("percentile")
+    @classmethod
+    def _percentile_allowed(cls, v: float) -> float:
+        if v not in ALLOWED_PERCENTILES:
+            raise ValueError(f"percentile must be one of {', '.join(f'{p:g}' for p in ALLOWED_PERCENTILES)}.")
+        return float(v)
 
     @field_validator("hazard")
     @classmethod
@@ -96,6 +112,8 @@ class AnalysisQuery(BaseModel):
             for name, year in (("reference_start_year", self.reference_start_year), ("reference_end_year", self.reference_end_year)):
                 if not MIN_YEAR <= year <= max_year:
                     raise ValueError(f"{name} must be between {MIN_YEAR} and {max_year}.")
+            if self.reference_start_year > self.reference_end_year:
+                raise ValueError("reference_start_year must not be after reference_end_year.")
             if self.reference_end_year - self.reference_start_year + 1 < MIN_REFERENCE_SPAN_YEARS:
                 raise ValueError(f"The reference period must span at least {MIN_REFERENCE_SPAN_YEARS} years.")
             if self.reference_end_year - self.reference_start_year + 1 > MAX_ANALYSIS_SPAN_YEARS:
@@ -206,6 +224,10 @@ class AnnualOut(BaseModel):
     missing_days: int
     completeness: float
     sufficient_data: bool
+    interpolated_days: int = 0
+    duplicate_dates: int = 0
+    implausible_days: int = 0
+    outlier_days: int = 0
     heatwave_days_rolling_mean: float | None
     event_count_rolling_mean: float | None
 
@@ -293,7 +315,15 @@ class QualityBlock(BaseModel):
     null_values: int
     implausible_values: int
     duplicate_dates: int
+    interpolated_days: int = 0
+    outlier_days: int = 0
     completeness: float
+
+
+class OutlierDay(BaseModel):
+    date: str
+    tmax_c: float
+    robust_z: float
 
 
 class DataQualityOut(BaseModel):
@@ -302,6 +332,9 @@ class DataQualityOut(BaseModel):
     min_year_completeness: float
     insufficient_years: list[int]
     plausible_range_c: list[float]
+    gap_fill: str = Field("off", description="'off' or 'single-day linear'")
+    outlier_method: str = ""
+    outlier_dates: list[OutlierDay] = Field(default_factory=list, description="Up to 20 most extreme flagged days")
 
 
 class AnalysisResponse(BaseModel):
