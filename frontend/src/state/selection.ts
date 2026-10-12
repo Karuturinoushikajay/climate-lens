@@ -29,7 +29,7 @@ export const DEFAULT_SELECTION: Selection = {
   startYear: 1990,
   endYear: DEFAULT_MAX_YEAR,
   hazard: 'heatwave',
-  baseline: 'analysis_period',
+  baseline: 'fixed_reference',
   referenceStartYear: 1991,
   referenceEndYear: 2020,
 }

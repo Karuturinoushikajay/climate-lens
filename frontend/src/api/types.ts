@@ -52,6 +52,12 @@ export interface MannKendall {
   var_s: number | null
   z: number | null
   p_value: number | null
+  z_uncorrected?: number | null
+  p_value_uncorrected?: number | null
+  variance_correction?: number | null
+  autocorrelation_lags?: number[]
+  sen_slope_ci_low?: number | null
+  sen_slope_ci_high?: number | null
   sen_slope_per_year: number | null
   direction: string
   significant: boolean

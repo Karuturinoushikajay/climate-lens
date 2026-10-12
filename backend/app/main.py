@@ -59,7 +59,7 @@ def create_app(
         settings.upstream_backoff_seconds,
     )
     app.state.service = AnalysisService(settings, app.state.cache, app.state.weather)
-    app.state.limiter = RateLimiter(60.0, settings.trust_proxy_headers)
+    app.state.limiter = RateLimiter(60.0, settings.proxy_hops)
 
     app.add_middleware(
         CORSMiddleware,

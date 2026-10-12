@@ -18,7 +18,10 @@ logger = logging.getLogger(__name__)
 VARIABLE = "temperature_2m_max"
 EXPECTED_UNITS = {"°C", "C", "degC"}
 PROVIDER = "Open-Meteo Historical Weather API"
-DATASET = "ERA5 / ERA5-Land reanalysis (Open-Meteo best_match)"
+# Pinned so the series is one consistent dataset from 1940 onward; Open-Meteo's default
+# "best_match" blends ERA5-Land (0.1°, from 1950) and other models.
+MODEL = "era5"
+DATASET = "ECMWF ERA5 reanalysis (Copernicus), 0.25° grid, via Open-Meteo"
 ATTRIBUTION = "Weather data by Open-Meteo.com (CC BY 4.0), based on Copernicus ERA5 reanalysis"
 
 
@@ -118,6 +121,7 @@ class OpenMeteoClient:
             "daily": VARIABLE,
             "temperature_unit": "celsius",
             "timezone": "auto",
+            "models": MODEL,
         }
         payload = self._request(params)
         locations = payload if isinstance(payload, list) else [payload]

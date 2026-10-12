@@ -19,18 +19,25 @@ MAX_TRACKED_CLIENTS = 10_000
 
 
 class RateLimiter:
-    def __init__(self, window_seconds: float = 60.0, trust_proxy_headers: bool = False):
+    """``trusted_proxy_hops`` is the number of proxies in front of the app that append to
+    X-Forwarded-For. The client is the entry that many positions from the right; anything to
+    its left was supplied by the client and is ignored. 0 uses the TCP peer address.
+    """
+
+    def __init__(self, window_seconds: float = 60.0, trusted_proxy_hops: int = 0):
         self.window = window_seconds
-        self.trust_proxy_headers = trust_proxy_headers
+        self.trusted_proxy_hops = max(0, trusted_proxy_hops)
         self._hits: dict[str, deque[float]] = defaultdict(deque)
         self._lock = threading.Lock()
 
     def client_id(self, request: Request) -> str:
-        if self.trust_proxy_headers:
-            forwarded = request.headers.get("x-forwarded-for", "")
-            if forwarded:
-                return forwarded.split(",")[0].strip()[:64]
-        return request.client.host if request.client else "unknown"
+        peer = request.client.host if request.client else "unknown"
+        if self.trusted_proxy_hops == 0:
+            return peer
+        hops = [h.strip() for h in request.headers.get("x-forwarded-for", "").split(",") if h.strip()]
+        if len(hops) < self.trusted_proxy_hops:
+            return peer
+        return hops[-self.trusted_proxy_hops][:64]
 
     def check(self, request: Request, bucket: str, limit: int) -> None:
         key = f"{bucket}:{self.client_id(request)}"

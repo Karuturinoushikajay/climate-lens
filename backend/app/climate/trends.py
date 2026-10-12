@@ -116,6 +116,19 @@ def period_change(years: Sequence[int], values: Sequence[float | None], window: 
     return result
 
 
+def mk_statement(mk: MannKendallResult) -> str:
+    """The required interpretation, qualified with the evidence behind it."""
+    if mk.p_value is None:
+        return mk.interpretation
+    detail = f"p = {mk.p_value:.3f} after serial-correlation adjustment, α = {mk.alpha:g}, {mk.n} years"
+    if mk.significant:
+        return (
+            f"{mk.interpretation} ({detail}). This is a statistical association in this reanalysis record, "
+            "not proof of a long-term climate trend."
+        )
+    return f"{mk.interpretation} ({detail})."
+
+
 def build_insights(
     label: str,
     start_year: int,
@@ -163,8 +176,13 @@ def build_insights(
             + " This describes the observed record and is not a forecast."
         )
 
-    insights.append(f"Mann-Kendall (heatwave days): {days_mk.interpretation}")
-    insights.append(f"Mann-Kendall (event counts): {events_mk.interpretation}")
+    insights.append(f"Mann-Kendall (heatwave days): {mk_statement(days_mk)}")
+    insights.append(f"Mann-Kendall (event counts): {mk_statement(events_mk)}")
+    if days_mk.significant or events_mk.significant:
+        insights.append(
+            "Three indicators are tested at α = 0.05 without a multiple-testing correction, so one significant "
+            "result among them is weaker evidence than its p-value alone suggests."
+        )
 
     if excluded_years:
         insights.append(

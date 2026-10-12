@@ -82,6 +82,30 @@ def test_alpha_controls_significance():
     assert mann_kendall(vals, alpha=0.10).significant
 
 
+def test_autocorrelated_series_is_adjusted():
+    # Slow oscillation around a weak drift: neighbouring years are strongly correlated.
+    vals = [0.05 * i + 1.5 * math.sin(i / 4.0) for i in range(40)]
+    r = mann_kendall(vals)
+    assert r.variance_correction is not None and r.variance_correction > 1
+    assert r.p_value_uncorrected < 0.05
+    assert r.p_value > 0.05
+    assert not r.significant
+    assert r.interpretation_code == "direction_not_significant"
+
+
+def test_independent_series_not_adjusted_below_one():
+    r = mann_kendall([1, 3, 2, 5, 4, 7, 6, 9, 8, 10])
+    assert r.variance_correction >= 1
+    assert r.p_value >= r.p_value_uncorrected
+
+
+def test_sen_slope_confidence_interval_brackets_slope():
+    rnd = __import__("random").Random(7)
+    vals = [0.05 * i + rnd.gauss(0, 1) for i in range(50)]
+    r = mann_kendall(vals)
+    assert r.sen_slope_ci_low <= r.sen_slope <= r.sen_slope_ci_high
+
+
 def test_invalid_alpha():
     with pytest.raises(ValueError):
         mann_kendall([1, 2, 3, 4], alpha=0)

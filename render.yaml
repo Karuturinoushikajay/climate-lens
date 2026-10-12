@@ -25,6 +25,9 @@ services:
         value: https://climate-lens(-[a-z0-9]+)?-karuturinoushikajays-projects\.vercel\.app
       - key: TRUST_PROXY_HEADERS
         value: "true"
+      # Cloudflare -> Render edge -> Render load balancer; the client IP is 3rd from the right.
+      - key: TRUSTED_PROXY_HOPS
+        value: "3"
       - key: OBSERVATION_CACHE_TTL_HOURS
         value: "720"
       - key: ANALYSIS_CACHE_TTL_HOURS

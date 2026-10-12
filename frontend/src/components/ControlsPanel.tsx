@@ -220,7 +220,7 @@ export function ControlsPanel({
           Percentile baseline{' '}
           <InfoTip text="The 95th-percentile threshold can come from the analysis period itself or from a fixed reference period (e.g. 1991-2020). Results from different baselines are not directly comparable." />
         </legend>
-        {(['analysis_period', 'fixed_reference'] as BaselineMode[]).map((mode) => (
+        {(['fixed_reference', 'analysis_period'] as BaselineMode[]).map((mode) => (
           <label key={mode} className="radio">
             <input
               type="radio"
@@ -229,7 +229,7 @@ export function ControlsPanel({
               checked={selection.baseline === mode}
               onChange={() => onChange({ baseline: mode })}
             />
-            {mode === 'analysis_period' ? 'Analysis period' : 'Fixed reference period'}
+            {mode === 'analysis_period' ? 'Analysis period' : 'Fixed reference period (recommended)'}
           </label>
         ))}
         {selection.baseline === 'fixed_reference' && (

@@ -212,6 +212,9 @@ export default function App() {
                   · {shown.data.baseline.mode === 'analysis_period' ? 'analysis-period baseline' : 'fixed reference baseline'} ·
                   cache {shown.data.cache.analysis}
                 </p>
+                <p className="fine" data-testid="result-dataset">
+                  Data: {shown.data.source.dataset}
+                </p>
               </div>
               <ExportButtons key={paramsKey(shown.params)} params={shown.params} disabled={loading} />
             </section>

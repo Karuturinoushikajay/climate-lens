@@ -45,8 +45,16 @@ describe('validateSelection', () => {
 })
 
 describe('toQueryParams', () => {
+  it('defaults to the fixed reference baseline with 1991-2020 years', () => {
+    expect(toQueryParams(DEFAULT_SELECTION)).toMatchObject({
+      baseline: 'fixed_reference',
+      reference_start_year: 1991,
+      reference_end_year: 2020,
+    })
+  })
+
   it('builds point params and omits reference years for analysis-period baseline', () => {
-    expect(toQueryParams(DEFAULT_SELECTION)).toEqual({
+    expect(toQueryParams({ ...DEFAULT_SELECTION, baseline: 'analysis_period' })).toEqual({
       start_year: 1990,
       end_year: DEFAULT_SELECTION.endYear,
       hazard: 'heatwave',

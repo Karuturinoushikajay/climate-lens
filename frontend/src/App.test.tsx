@@ -157,13 +157,27 @@ describe('App', () => {
     expect(lastAnalyze().get('end_year')).toBe('2012')
   })
 
-  it('fixed reference baseline sends reference years', async () => {
+  it('defaults to the fixed 1991-2020 reference baseline', async () => {
     const user = await renderLoaded()
-    await user.click(screen.getByLabelText('Fixed reference period'))
+    expect(screen.getByRole('radio', { name: /fixed reference period/i })).toBeChecked()
     await user.click(screen.getByRole('button', { name: /run analysis/i }))
     await waitFor(() => expect(lastAnalyze().get('baseline')).toBe('fixed_reference'))
     expect(lastAnalyze().get('reference_start_year')).toBe('1991')
     expect(lastAnalyze().get('reference_end_year')).toBe('2020')
+  })
+
+  it('analysis-period baseline omits reference years', async () => {
+    const user = await renderLoaded()
+    await user.click(screen.getByLabelText('Analysis period'))
+    await user.click(screen.getByRole('button', { name: /run analysis/i }))
+    await waitFor(() => expect(lastAnalyze().get('baseline')).toBe('analysis_period'))
+    expect(lastAnalyze().get('reference_start_year')).toBeNull()
+  })
+
+  it('names the dataset in the results header', async () => {
+    const user = await renderLoaded()
+    await user.click(screen.getByRole('button', { name: /run analysis/i }))
+    expect(await screen.findByTestId('result-dataset')).toHaveTextContent('Data: ERA5')
   })
 
   it('shows loading state and disables the run button during a request', async () => {

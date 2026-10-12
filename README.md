@@ -5,7 +5,7 @@ Climate Lens detects heatwaves in historical daily maximum temperature data and 
 - **Frontend:** React 19, TypeScript, Vite, Recharts, React Leaflet, Lucide icons
 - **Backend:** Python, FastAPI, Pydantic, HTTPX, NumPy, ReportLab
 - **Storage:** MongoDB with TTL indexes, falling back to an in-process cache
-- **Data:** [Open-Meteo Historical Weather API](https://open-meteo.com/en/docs/historical-weather-api), daily `temperature_2m_max` from ERA5 / ERA5-Land reanalysis
+- **Data:** [Open-Meteo Historical Weather API](https://open-meteo.com/en/docs/historical-weather-api), daily `temperature_2m_max` from the ECMWF ERA5 reanalysis (`models=era5`, 0.25° grid). The dataset is named in the results header, the CSV metadata and the PDF.
 
 **Live demo:** https://climate-lens-gamma.vercel.app
 **API:** https://climate-lens-api.onrender.com/api/health (interactive docs at [/docs](https://climate-lens-api.onrender.com/docs))
@@ -13,7 +13,7 @@ Climate Lens detects heatwaves in historical daily maximum temperature data and 
 The backend is on Render's free tier and sleeps when idle, so the first request after a pause can take up to a minute.
 
 > **Status, stated honestly**
-> - **Implemented and tested:** the full analysis pipeline, the API, CSV and PDF exports, the dashboard, and the map. 89 backend tests and 39 frontend tests pass.
+> - **Implemented and tested:** the full analysis pipeline, the API, CSV and PDF exports, the dashboard, and the map. 100 backend tests and 42 frontend tests pass.
 > - **Verified locally:** the backend and frontend dev servers, run against the live Open-Meteo API.
 > - **Not yet verified:** the Docker Compose stack. Docker Desktop's Linux engine could not start on the development machine because WSL has no distributions installed. The Compose file validates with `docker compose config`, but the containers were not built or run.
 > - **Deployed and verified live (12 October 2026):** frontend on Vercel, backend on Render, cache on MongoDB Atlas (free M0). Live checks passed for CORS from the Vercel origin, a Hyderabad 1990-2025 analysis, the CSV download, and the PDF download. `/api/health` reports `"mode": "mongodb"`, and a repeated Delhi 2000-2024 analysis went from a cache miss (3.9 s) to a MongoDB cache hit (1.1 s).
@@ -47,7 +47,7 @@ The backend is on Render's free tier and sleeps when idle, so the first request 
 
 **Hazard:** Heatwave is selected by default. Drought and heavy rainfall appear in the list but are disabled, and the API rejects them.
 
-**Baselines:** the 95th-percentile threshold comes either from the analysis period itself or from a fixed reference period such as 1991-2020.
+**Baselines:** the 95th-percentile threshold comes from the fixed 1991-2020 reference period by default, or optionally from the analysis period itself.
 
 **Dashboard**
 - Summary cards
@@ -167,7 +167,8 @@ All settings come from environment variables; see [.env.example](.env.example). 
 | `ANALYSIS_CACHE_TTL_HOURS` | `168` | TTL for derived analyses |
 | `RATE_LIMIT_ANALYZE_PER_MINUTE` | `30` | Per-IP limit for `/api/analyze` |
 | `RATE_LIMIT_EXPORT_PER_MINUTE` | `10` | Per-IP limit for exports |
-| `TRUST_PROXY_HEADERS` | `false` | Use `X-Forwarded-For` for the client IP. Enable only behind a trusted proxy such as Render. |
+| `TRUSTED_PROXY_HOPS` | unset | Number of proxies in front of the app that append to `X-Forwarded-For`. The client IP is taken that many entries from the **right**, so values a client adds on the left are ignored. `0` uses the TCP peer address. |
+| `TRUST_PROXY_HEADERS` | `false` | Legacy switch. When `TRUSTED_PROXY_HOPS` is unset, `true` means 3 trusted hops (Render behind Cloudflare: client, Cloudflare edge, Render load balancer) and `false` means 0. |
 | `UPSTREAM_TIMEOUT_SECONDS` | `30` | Open-Meteo request timeout |
 | `UPSTREAM_MAX_RETRIES` | `2` | Retries on timeouts, transport errors, and 5xx responses. 429 responses are never retried. |
 | `ENVIRONMENT` | `development` | Informational |
@@ -194,7 +195,7 @@ Query parameters, shared by the last three endpoints:
 | `start_year`, `end_year` | From 1940 to the last complete calendar year; the window may span at most 60 years. |
 | `label` | Optional. Control characters are stripped and the result is truncated to 80 characters. |
 | `hazard` | `heatwave`. Anything else returns `422`. |
-| `baseline` | `analysis_period` (default) or `fixed_reference` |
+| `baseline` | `fixed_reference` (default) or `analysis_period` |
 | `reference_start_year`, `reference_end_year` | Defaults 1991 and 2020. Used only with `fixed_reference`; the period must be 10 to 60 years. |
 
 Every error has the shape `{"error": {"code", "message", "details?"}}`, with these status codes:
@@ -222,8 +223,8 @@ Each item below is either **[Brief]**, a requirement taken from the case-study b
 
 ### Data source [Assumption]
 
-- **Provider:** Open-Meteo Historical Weather API, `daily=temperature_2m_max`, `temperature_unit=celsius`, `timezone=auto`. Daily maxima therefore use the location's local calendar day.
-- **Underlying data:** ERA5 / ERA5-Land reanalysis, which is model-based and gridded. It is not station data.
+- **Provider:** Open-Meteo Historical Weather API, `daily=temperature_2m_max`, `models=era5`, `temperature_unit=celsius`, `timezone=auto`. Daily maxima therefore use the location's local calendar day.
+- **Underlying data:** ECMWF ERA5 reanalysis (Copernicus) on a 0.25° grid, available from 1940. It is pinned explicitly rather than using Open-Meteo's `best_match`, which blends ERA5-Land and other models, so the dataset is the same for every year and every query. Reanalysis is model-based and gridded; it is not station data. The model is part of the cache key.
 - **Spatial meaning:** a point query describes the reanalysis grid cell it falls in, not a whole city.
 - **Box queries:** the daily value is the mean of up to a 2x2 grid of cell-centre points inside the box. A day is treated as missing unless every sampled point has a valid value. The grid is capped at 2x2 to stay within the provider's free quota (see [Known limitations](#known-limitations)). It is a coarse sample, not an area-weighted average.
 
@@ -242,8 +243,9 @@ A heatwave is **at least 3 consecutive valid days** with daily maximum temperatu
 ### Percentile baseline [Assumption]
 
 - **Method:** `numpy.percentile(..., method="linear")`, which is Hyndman & Fan type 7, applied to all valid daily values in the baseline period. No seasonal (day-of-year) percentile is used, so heatwaves are absolute hot spells for the location.
-- **`analysis_period` (default):** the threshold depends on the selected years. Results for different periods use different thresholds and should not be compared directly.
-- **`fixed_reference`:** the threshold comes from separate reference years (for example 1991-2020) and is applied to the analysis years. The baseline mode and its years are echoed in every output and are part of the cache key.
+- **`fixed_reference` (default, 1991-2020):** the threshold comes from the WMO climate-normal reference years and is applied to the analysis years, so results for different analysis periods share one threshold and can be compared. The reference years can be changed.
+- **`analysis_period`:** the threshold depends on the selected years. Results for different periods use different thresholds and should not be compared directly.
+- The baseline mode and its years are echoed in every output and are part of the cache key.
 
 ### Annual accounting [Assumption]
 
@@ -269,11 +271,12 @@ The indicators are annual heatwave days, annual event counts, and annual mean da
   - \(\operatorname{Var}(S)=\frac{n(n-1)(2n+5)-\sum_g t_g(t_g-1)(2t_g+5)}{18}\), which includes the tie correction
   - \(Z=(S\mp1)/\sqrt{\operatorname{Var}(S)}\), with a continuity correction
   - Two-sided \(p=\operatorname{erfc}(|Z|/\sqrt2)\), with \(\alpha=0.05\)
-- Sen's slope is reported alongside.
+- **Serial-correlation adjustment (Hamed & Rao 1998).** The series is detrended with Sen's slope and ranked; rank autocorrelations significant at \(\alpha\) are used to compute \(n/n^*=1+\frac{2}{n(n-1)(n-2)}\sum_k (n-k)(n-k-1)(n-k-2)\rho_k\), floored at 1 so the adjustment can only make the test more conservative. \(\operatorname{Var}(S)\) is multiplied by this factor. **The verdict uses the adjusted p-value.** The unadjusted Z and p are reported alongside for comparison.
+- Sen's slope is reported with a \(1-\alpha\) confidence interval (Gilbert 1987) built from the adjusted variance.
 - Needs at least 4 values. Results with fewer than 10 values are flagged, because the normal approximation is weak at small sample sizes. Missing or invalid values are dropped and counted.
 - A constant series has \(\operatorname{Var}(S)=0\), so Z and p are reported as undefined.
 - The p-value is checked against hand-computed reference values in `tests/test_mann_kendall.py`.
-- **Limitation:** the test assumes independent years. Positive serial autocorrelation inflates false positives. No pre-whitening or modified-variance correction (such as Hamed-Rao or Yue-Wang) is applied.
+- **Limitation:** Hamed-Rao relies on estimated autocorrelations, which are noisy for short records. Three indicators are tested without a multiple-testing correction.
 
 **Interpretation wording.** Results are described with one of these phrases:
 - "Increasing monotonic trend detected, with the significance criterion met."
@@ -282,7 +285,7 @@ The indicators are annual heatwave days, annual event counts, and annual mean da
 - "No statistically detectable monotonic trend under this test."
 - "Insufficient data for reliable testing."
 
-A non-significant result is never presented as proof of no trend, and neither method is presented as evidence of causation.
+Insights quote the adjusted p-value, α and the number of years. A significant result is described as a statistical association in this reanalysis record, not proof of a long-term climate trend. A non-significant result is never presented as proof of no trend, and neither method is presented as evidence of causation.
 
 **Percentage change in insights.**
 - The mean of the first 5 qualifying years is compared with the mean of the last 5.
@@ -334,8 +337,8 @@ A non-significant result is never presented as proof of no trend, and neither me
 Run them yourself:
 
 ```bash
-cd backend && python -m pytest          # 89 tests
-cd frontend && npm test                 # 39 tests (Vitest + React Testing Library)
+cd backend && python -m pytest          # 100 tests
+cd frontend && npm test                 # 42 tests (Vitest + React Testing Library)
 cd frontend && npm run build            # type-check + production build
 ```
 
@@ -343,8 +346,8 @@ Results recorded on 12 October 2026 (Windows 11, Python 3.14.4, Node 25.9):
 
 | Suite | Result |
 | --- | --- |
-| Backend `pytest` | **89 passed** |
-| Frontend `vitest run` | **39 passed** (4 files) |
+| Backend `pytest` | **100 passed** |
+| Frontend `vitest run` | **42 passed** (4 files) |
 | Frontend `tsc -b && vite build` | Passed |
 | Frontend `oxlint` | No warnings |
 | Live smoke test against the real Open-Meteo API | Passed. Point analyses for Hyderabad (1990-2025) and Delhi (1995-2024) returned complete data, a valid CSV, and a valid 5-page PDF. A Telangana box (2015-2024) sampled 4 grid points with no excluded years. |
@@ -453,8 +456,8 @@ The MongoDB code path is covered by `mongomock` tests and has been verified agai
 - A fixed reference period that overlaps the analysis period introduces some dependence between the two.
 
 **Statistics**
-- No autocorrelation correction for Mann-Kendall.
-- No multiple-testing correction across the three indicators.
+- The Hamed-Rao adjustment depends on autocorrelation estimates, which are uncertain for short records.
+- No multiple-testing correction across the three indicators (stated in the UI and insights).
 - Regression on count data assumes linear, homoscedastic behaviour.
 
 **Scaling:** the in-memory cache and rate limits are per process.
@@ -466,7 +469,7 @@ The MongoDB code path is covered by `mongomock` tests and has been verified agai
 ## Future improvements
 
 - Day-of-year (seasonal) percentile thresholds and an optional Tmin or heat-index co-condition.
-- A modified Mann-Kendall test with autocorrelation correction (Hamed-Rao or Yue-Wang pre-whitening), and confidence intervals for Sen's slope.
+- Field significance or false-discovery-rate control across indicators and regions.
 - Drought (SPI/SPEI) and heavy-rainfall (R95p, Rx1day) hazards behind the existing hazard parameter.
 - Area-weighted box averages using the provider's native grid, plus administrative boundary polygons (GeoJSON).
 - Redis for a shared cache and rate limiting, and background prefetching of preset regions.

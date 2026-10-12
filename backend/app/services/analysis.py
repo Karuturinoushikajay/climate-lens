@@ -55,7 +55,7 @@ from ..models.schemas import (
     TrendsOut,
     YearDays,
 )
-from .weather import ATTRIBUTION, DATASET, PROVIDER, VARIABLE, OpenMeteoClient, WeatherSeries
+from .weather import ATTRIBUTION, DATASET, MODEL, PROVIDER, VARIABLE, OpenMeteoClient, WeatherSeries
 
 logger = logging.getLogger(__name__)
 
@@ -116,7 +116,13 @@ def _mk_out(r: MannKendallResult) -> MannKendallOut:
         var_s=r.var_s,
         z=r.z,
         p_value=r.p_value,
+        z_uncorrected=r.z_uncorrected,
+        p_value_uncorrected=r.p_value_uncorrected,
+        variance_correction=r.variance_correction,
+        autocorrelation_lags=r.autocorrelation_lags,
         sen_slope_per_year=r.sen_slope,
+        sen_slope_ci_low=r.sen_slope_ci_low,
+        sen_slope_ci_high=r.sen_slope_ci_high,
         direction=r.direction,
         significant=r.significant,
         interpretation_code=r.interpretation_code,
@@ -172,7 +178,7 @@ class AnalysisService:
     def _observations(self, points: list[tuple[float, float]], start: date, end: date) -> tuple[WeatherSeries, bool]:
         key = make_key(
             "obs",
-            {"schema": OBSERVATION_SCHEMA, "points": points, "start": start, "end": end, "variable": VARIABLE},
+            {"schema": OBSERVATION_SCHEMA, "points": points, "start": start, "end": end, "variable": VARIABLE, "model": MODEL},
         )
         doc = self.cache.get("observations", key)
         if doc is not None:
@@ -464,13 +470,14 @@ class AnalysisService:
     @staticmethod
     def _caveats(q: AnalysisQuery, threshold: float | None) -> list[str]:
         caveats = [
-            "Data are ERA5-family reanalysis estimates served by Open-Meteo, not weather-station observations.",
+            f"Data are {DATASET} model estimates, not weather-station observations.",
             "Daily maximum temperature is aggregated in the location's local time zone.",
             "Events touching the first or last day of the analysis window may be truncated by the window.",
             "Linear regression describes the observed record; it is not a forecast and its slope alone does not "
             "establish statistical significance.",
-            "The Mann-Kendall test assumes independent annual values. Serial autocorrelation can inflate "
-            "significance; no autocorrelation correction (e.g. pre-whitening) is applied.",
+            "Mann-Kendall p-values are adjusted for serial correlation (Hamed-Rao variance correction); the "
+            "uncorrected values are reported alongside. Three indicators are tested without a multiple-testing "
+            "correction.",
             "A non-significant result does not prove the absence of a trend, and neither test establishes causation.",
             "Missing observations are never interpolated or zero-filled; any missing day breaks a heatwave run, which "
             "can under-count events in incomplete years.",

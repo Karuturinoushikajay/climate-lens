@@ -42,7 +42,9 @@ class AnalysisQuery(BaseModel):
     end_year: int = Field(2020, description="Last calendar year of the analysis window")
     label: str | None = Field(None, max_length=200, description=f"Display name (truncated to {MAX_LABEL_LENGTH} chars)")
     hazard: str = Field("heatwave", max_length=40, description="Hazard type. Only 'heatwave' is implemented.")
-    baseline: BaselineMode = Field("analysis_period", description="Percentile baseline mode")
+    baseline: BaselineMode = Field(
+        "fixed_reference", description="Percentile baseline mode; defaults to the fixed 1991-2020 reference period"
+    )
     reference_start_year: int = Field(1991, description="Reference period start (fixed_reference only)")
     reference_end_year: int = Field(2020, description="Reference period end (fixed_reference only)")
 
@@ -241,8 +243,14 @@ class MannKendallOut(BaseModel):
     var_s_no_ties: float | None
     var_s: float | None
     z: float | None
-    p_value: float | None
+    p_value: float | None = Field(description="Two-sided p-value after the Hamed-Rao serial-correlation correction")
+    z_uncorrected: float | None = None
+    p_value_uncorrected: float | None = None
+    variance_correction: float | None = Field(None, description="Hamed-Rao variance inflation n/n*, floored at 1")
+    autocorrelation_lags: list[int] = []
     sen_slope_per_year: float | None
+    sen_slope_ci_low: float | None = None
+    sen_slope_ci_high: float | None = None
     direction: str
     significant: bool
     interpretation_code: str

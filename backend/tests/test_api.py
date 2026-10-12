@@ -145,6 +145,14 @@ def test_fixed_reference_baseline(client, mock_api):
     assert mock_api.calls.call_count == 1
 
 
+def test_defaults_to_fixed_reference_and_era5(client, mock_api):
+    body = client.get("/api/analyze", params=q()).json()
+    assert body["baseline"]["mode"] == "fixed_reference"
+    assert (body["baseline"]["reference_start_year"], body["baseline"]["reference_end_year"]) == (1991, 2020)
+    assert mock_api.calls.last.request.url.params["models"] == "era5"
+    assert "ERA5" in body["source"]["dataset"]
+
+
 def test_fixed_reference_disjoint_fetches_two_ranges(client, mock_api):
     client.get(
         "/api/analyze",
@@ -215,6 +223,50 @@ def test_rate_limit(make_client, mock_api):
     # export bucket is independent
     assert c.get("/api/export.csv", params=q()).status_code == 200
     assert c.get("/api/export.csv", params=q()).status_code == 429
+
+
+def test_rate_limit_ignores_spoofed_forwarded_for(make_client, mock_api):
+    mock_api.get(ARCHIVE_URL).mock(side_effect=open_meteo_handler())
+    c = make_client(rate_limit_analyze_per_minute=30, trusted_proxy_hops=1)
+    statuses = [
+        c.get("/api/analyze", params=q(), headers={"X-Forwarded-For": f"10.0.0.{i}, 203.0.113.7"}).status_code
+        for i in range(31)
+    ]
+    assert statuses[:30] == [200] * 30
+    assert statuses[30] == 429
+
+
+def test_rate_limit_separates_real_clients_behind_proxy(make_client, mock_api):
+    mock_api.get(ARCHIVE_URL).mock(side_effect=open_meteo_handler())
+    c = make_client(rate_limit_analyze_per_minute=1, trusted_proxy_hops=1)
+    assert c.get("/api/analyze", params=q(), headers={"X-Forwarded-For": "203.0.113.7"}).status_code == 200
+    assert c.get("/api/analyze", params=q(), headers={"X-Forwarded-For": "203.0.113.8"}).status_code == 200
+    assert c.get("/api/analyze", params=q(), headers={"X-Forwarded-For": "9.9.9.9, 203.0.113.8"}).status_code == 429
+
+
+def test_rate_limit_render_header_layout(make_client, mock_api):
+    mock_api.get(ARCHIVE_URL).mock(side_effect=open_meteo_handler())
+    c = make_client(rate_limit_analyze_per_minute=1, trusted_proxy_hops=3)
+    tail = "198.51.100.20, 172.68.146.199, 10.29.149.43"
+    assert c.get("/api/analyze", params=q(), headers={"X-Forwarded-For": f"1.2.3.4, {tail}"}).status_code == 200
+    assert c.get("/api/analyze", params=q(), headers={"X-Forwarded-For": f"5.6.7.8, {tail}"}).status_code == 429
+
+
+def test_rate_limit_without_proxy_ignores_forwarded_for(make_client, mock_api):
+    mock_api.get(ARCHIVE_URL).mock(side_effect=open_meteo_handler())
+    c = make_client(rate_limit_analyze_per_minute=1)
+    assert c.get("/api/analyze", params=q(), headers={"X-Forwarded-For": "1.1.1.1"}).status_code == 200
+    assert c.get("/api/analyze", params=q(), headers={"X-Forwarded-For": "2.2.2.2"}).status_code == 429
+
+
+@pytest.mark.parametrize(
+    "overrides, hops",
+    [({}, 0), ({"trust_proxy_headers": True}, 3), ({"trust_proxy_headers": True, "trusted_proxy_hops": 2}, 2)],
+)
+def test_proxy_hops_setting(overrides, hops):
+    from .conftest import make_settings
+
+    assert make_settings(**overrides).proxy_hops == hops
 
 
 def test_cors_restricted(client):
