@@ -158,13 +158,17 @@ class OpenMeteoClient:
             aggregation=aggregation,
         )
 
-    def _request(self, params: dict[str, str]) -> Any:
+    def get_json(self, url: str, params: dict[str, Any]) -> Any:
+        """GET another Open-Meteo endpoint with the same retry and error mapping."""
+        return self._request(params, url)
+
+    def _request(self, params: dict[str, Any], url: str | None = None) -> Any:
         last_error = "unknown error"
         for attempt in range(self.max_retries + 1):
             if attempt:
                 time.sleep(self.backoff_seconds * (2 ** (attempt - 1)))
             try:
-                response = self._client.get(self.base_url, params=params)
+                response = self._client.get(url or self.base_url, params=params)
             except httpx.TimeoutException:
                 last_error = "timeout"
                 logger.warning("Open-Meteo timeout (attempt %s)", attempt + 1)

@@ -13,7 +13,7 @@ Climate Lens detects heatwaves in historical daily maximum temperature data and 
 The backend is on Render's free tier and sleeps when idle, so the first request after a pause can take up to a minute.
 
 > **Status, stated honestly**
-> - **Implemented and tested:** the full analysis pipeline, the API, CSV and PDF exports, the dashboard, and the map. 100 backend tests and 42 frontend tests pass.
+> - **Implemented and tested:** the full analysis pipeline, the API, CSV and PDF exports, the dashboard, and the map. 112 backend tests and 47 frontend tests pass.
 > - **Verified locally:** the backend and frontend dev servers, run against the live Open-Meteo API.
 > - **Not yet verified:** the Docker Compose stack. Docker Desktop's Linux engine could not start on the development machine because WSL has no distributions installed. The Compose file validates with `docker compose config`, but the containers were not built or run.
 > - **Deployed and verified live (12 October 2026):** frontend on Vercel, backend on Render, cache on MongoDB Atlas (free M0). Live checks passed for CORS from the Vercel origin, a Hyderabad 1990-2025 analysis, the CSV download, and the PDF download. `/api/health` reports `"mode": "mongodb"`, and a repeated Delhi 2000-2024 analysis went from a cache miss (3.9 s) to a MongoDB cache hit (1.1 s).
@@ -40,6 +40,7 @@ The backend is on Render's free tier and sleeps when idle, so the first request 
 ## Features
 
 **Region selection**
+- City search: type any city or place name (at least 2 characters) and pick a match. Results come from the free [Open-Meteo Geocoding API](https://open-meteo.com/en/docs/geocoding-api) (GeoNames data) through the backend, which caches them for 30 days and rate-limits searches to 60 per minute per client. Choosing a result sets the point, the label (for example "Phoenix, Arizona, United States") and the map. It never starts an analysis by itself.
 - City presets (Hyderabad, Mumbai, Delhi, Bengaluru, Chennai, Visakhapatnam, Kolkata, Pune, Ahmedabad, Jaipur, Nagpur, Lucknow) are single points.
 - State presets (Telangana, Andhra Pradesh, Tamil Nadu, Rajasthan, Maharashtra, Odisha) are approximate rectangles.
 - On the map, click once to choose a point, or click two corners to draw a lat-lon box.
@@ -167,6 +168,9 @@ All settings come from environment variables; see [.env.example](.env.example). 
 | `ANALYSIS_CACHE_TTL_HOURS` | `168` | TTL for derived analyses |
 | `RATE_LIMIT_ANALYZE_PER_MINUTE` | `30` | Per-IP limit for `/api/analyze` |
 | `RATE_LIMIT_EXPORT_PER_MINUTE` | `10` | Per-IP limit for exports |
+| `RATE_LIMIT_GEOCODE_PER_MINUTE` | `60` | Per-IP limit for city search |
+| `GEOCODE_CACHE_TTL_HOURS` | `720` | TTL for cached city-search results |
+| `OPEN_METEO_GEOCODING_URL` | `https://geocoding-api.open-meteo.com/v1/search` | Geocoding endpoint |
 | `TRUSTED_PROXY_HOPS` | unset | Number of proxies in front of the app that append to `X-Forwarded-For`. The client IP is taken that many entries from the **right**, so values a client adds on the left are ignored. `0` uses the TCP peer address. |
 | `TRUST_PROXY_HEADERS` | `false` | Legacy switch. When `TRUSTED_PROXY_HOPS` is unset, `true` means 3 trusted hops (Render behind Cloudflare: client, Cloudflare edge, Render load balancer) and `false` means 0. |
 | `UPSTREAM_TIMEOUT_SECONDS` | `30` | Open-Meteo request timeout |
@@ -182,6 +186,7 @@ Interactive OpenAPI documentation is served at `/docs`.
 | --- | --- |
 | `GET /api/health` | Status, version, algorithm version, cache mode and health, data source, limits |
 | `GET /api/regions` | Preset cities (points) and states (boxes) |
+| `GET /api/geocode?name=Phoenix&count=5` | City search (Open-Meteo Geocoding, cached). `name` needs at least 2 characters; `count` is 1-10. No match returns an empty `results` list, not an error. |
 | `GET /api/analyze` | Full analysis as JSON |
 | `GET /api/export.csv` | Annual indicators as CSV for the same query |
 | `GET /api/export.pdf` | PDF report for the same query |
@@ -337,8 +342,8 @@ Insights quote the adjusted p-value, α and the number of years. A significant r
 Run them yourself:
 
 ```bash
-cd backend && python -m pytest          # 100 tests
-cd frontend && npm test                 # 42 tests (Vitest + React Testing Library)
+cd backend && python -m pytest          # 112 tests
+cd frontend && npm test                 # 47 tests (Vitest + React Testing Library)
 cd frontend && npm run build            # type-check + production build
 ```
 
@@ -346,8 +351,8 @@ Results recorded on 12 October 2026 (Windows 11, Python 3.14.4, Node 25.9):
 
 | Suite | Result |
 | --- | --- |
-| Backend `pytest` | **100 passed** |
-| Frontend `vitest run` | **42 passed** (4 files) |
+| Backend `pytest` | **112 passed** |
+| Frontend `vitest run` | **47 passed** (4 files) |
 | Frontend `tsc -b && vite build` | Passed |
 | Frontend `oxlint` | No warnings |
 | Live smoke test against the real Open-Meteo API | Passed. Point analyses for Hyderabad (1990-2025) and Delhi (1995-2024) returned complete data, a valid CSV, and a valid 5-page PDF. A Telangana box (2015-2024) sampled 4 grid points with no excluded years. |
@@ -372,6 +377,7 @@ What the backend tests cover (Open-Meteo is mocked with `respx`, so no network i
   - Cache hits and misses, rate limits, and CORS
   - CSV headers and content, the formula-injection guard, PDF validity and page numbers, and PDF markup escaping
   - **A cross-check that dashboard JSON, CSV rows, and PDF text agree for the same request**
+  - City search: parsing, empty results, case-insensitive caching, skipping results without valid coordinates, validation, provider failures (not cached), and its rate limit
 - **Cache:** MongoDB TTL index, expiry, and failure fallback (with mongomock); memory-cache LRU and TTL.
 
 What the frontend tests cover:
@@ -382,6 +388,7 @@ What the frontend tests cover:
 - The API error banner and Retry
 - CSV and PDF downloads that use the displayed analysis, and export failures
 - Disabled unsupported hazards
+- City search: choosing a result by mouse or keyboard sets the coordinates, label and map; no request under 2 characters; no-match and error messages
 - Superseded-request handling in `useAnalysis`
 - Client helpers and selection validation
 

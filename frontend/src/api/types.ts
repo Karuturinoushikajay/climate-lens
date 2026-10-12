@@ -19,6 +19,26 @@ export interface RegionsResponse {
   note: string
 }
 
+export interface Place {
+  id: number | null
+  name: string
+  latitude: number
+  longitude: number
+  admin1: string | null
+  country: string | null
+  country_code: string | null
+  timezone: string | null
+  population: number | null
+}
+
+export interface GeocodeResponse {
+  query: string
+  results: Place[]
+  provider: string
+  attribution: string
+  cache: 'hit' | 'miss'
+}
+
 export interface HealthResponse {
   status: string
   version: string

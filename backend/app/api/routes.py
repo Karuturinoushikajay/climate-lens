@@ -9,7 +9,15 @@ from ..climate import ALGORITHM_VERSION
 from ..config import MAX_ANALYSIS_SPAN_YEARS, MAX_BOX_SPAN_DEGREES, MIN_YEAR, latest_complete_year
 from ..exports.csv_export import build_csv, safe_filename
 from ..exports.pdf_report import build_pdf
-from ..models.schemas import AnalysisQuery, AnalysisResponse, ErrorResponse, HealthResponse, RegionsResponse
+from ..models.schemas import (
+    AnalysisQuery,
+    AnalysisResponse,
+    ErrorResponse,
+    GeocodeQuery,
+    GeocodeResponse,
+    HealthResponse,
+    RegionsResponse,
+)
 from ..services.regions import preset_regions
 from ..services.weather import ATTRIBUTION, DATASET, PROVIDER
 
@@ -52,6 +60,7 @@ def health(request: Request) -> HealthResponse:
             "max_box_span_degrees": MAX_BOX_SPAN_DEGREES,
             "rate_limit_analyze_per_minute": s.rate_limit_analyze_per_minute,
             "rate_limit_export_per_minute": s.rate_limit_export_per_minute,
+            "rate_limit_geocode_per_minute": s.rate_limit_geocode_per_minute,
             "rate_limits_scope": "per client IP, per backend process",
         },
     )
@@ -63,6 +72,13 @@ def regions() -> RegionsResponse:
         regions=preset_regions(),
         note="City presets are single points; state presets are approximate rectangles, not administrative boundaries.",
     )
+
+
+@router.get("/geocode", response_model=GeocodeResponse, responses=ERROR_RESPONSES, summary="Search places by name")
+def geocode(request: Request, q: Annotated[GeocodeQuery, Query()]) -> GeocodeResponse:
+    state = request.app.state
+    state.limiter.check(request, "geocode", state.settings.rate_limit_geocode_per_minute)
+    return state.geocoder.search(q.name, q.count)
 
 
 @router.get("/analyze", response_model=AnalysisResponse, responses=ERROR_RESPONSES, summary="Heatwave analysis")

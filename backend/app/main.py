@@ -16,6 +16,7 @@ from .config import Settings, get_settings
 from .errors import AppError
 from .security.rate_limit import RateLimiter
 from .services.analysis import AnalysisService
+from .services.geocoding import GeocodingService
 from .services.weather import OpenMeteoClient
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -59,6 +60,9 @@ def create_app(
         settings.upstream_backoff_seconds,
     )
     app.state.service = AnalysisService(settings, app.state.cache, app.state.weather)
+    app.state.geocoder = GeocodingService(
+        app.state.weather, app.state.cache, settings.open_meteo_geocoding_url, settings.geocode_cache_ttl_hours
+    )
     app.state.limiter = RateLimiter(60.0, settings.proxy_hops)
 
     app.add_middleware(

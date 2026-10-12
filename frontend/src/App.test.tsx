@@ -29,13 +29,34 @@ function defaultAnalyze(url: URL): Promise<Response> {
   )
 }
 
+const PHOENIX = {
+  id: 5308655,
+  name: 'Phoenix',
+  latitude: 33.44838,
+  longitude: -112.07404,
+  admin1: 'Arizona',
+  country: 'United States',
+  country_code: 'US',
+  timezone: 'America/Phoenix',
+  population: 1650070,
+}
+const PHOENIX_OR = { ...PHOENIX, id: 5745656, latitude: 42.27541, longitude: -122.81809, admin1: 'Oregon', population: 4553 }
+
+function defaultGeocode(url: URL): Promise<Response> {
+  const name = url.searchParams.get('name') ?? ''
+  const results = name.toLowerCase().startsWith('phoe') ? [PHOENIX, PHOENIX_OR] : []
+  return Promise.resolve(json({ query: name, results, provider: 'Open-Meteo Geocoding API', attribution: '', cache: 'miss' }))
+}
+
 let analyzeResponder: Responder
 let exportResponder: Responder
+let geocodeResponder: Responder
 let calls: URL[]
 
 beforeEach(() => {
   calls = []
   analyzeResponder = defaultAnalyze
+  geocodeResponder = defaultGeocode
   exportResponder = async (url) =>
     new Response(url.pathname.endsWith('.pdf') ? '%PDF-1.4' : 'Year\n2000', {
       status: 200,
@@ -50,6 +71,7 @@ beforeEach(() => {
     if (url.pathname === '/api/regions') return json({ regions: PRESETS, note: '' })
     if (url.pathname === '/api/health') return json(HEALTH)
     if (url.pathname === '/api/analyze') return analyzeResponder(url, init)
+    if (url.pathname === '/api/geocode') return geocodeResponder(url, init)
     if (url.pathname.startsWith('/api/export')) return exportResponder(url, init)
     return json({ error: { code: 'not_found', message: 'nope' } }, 404)
   })
@@ -316,5 +338,66 @@ describe('App', () => {
     await renderLoaded()
     expect(screen.getByRole('option', { name: /drought/i })).toBeDisabled()
     expect(screen.getByLabelText('Hazard type')).toHaveValue('heatwave')
+  })
+
+  describe('city search', () => {
+    const geocodeCalls = () => calls.filter((u) => u.pathname === '/api/geocode')
+
+    it('picking a result sets coordinates, label and map, and runs on that point', async () => {
+      const user = await renderLoaded()
+      fakeMap.setView.mockClear()
+      await user.type(screen.getByRole('combobox', { name: /search city/i }), 'Phoenix')
+      const option = await screen.findByRole('option', { name: /Phoenix, Arizona, United States/ })
+      expect(geocodeCalls().at(-1)!.searchParams.get('name')).toBe('Phoenix')
+      await user.click(option)
+
+      expect(screen.getByLabelText('Latitude')).toHaveValue(33.44838)
+      expect(screen.getByLabelText('Longitude')).toHaveValue(-112.07404)
+      expect(screen.getByLabelText('Location label')).toHaveValue('Phoenix, Arizona, United States')
+      expect(screen.getByLabelText('Preset region')).toHaveValue('')
+      await waitFor(() => expect(fakeMap.setView).toHaveBeenCalledWith([33.44838, -112.07404], expect.any(Number)))
+
+      await user.click(screen.getByRole('button', { name: /run analysis/i }))
+      await waitFor(() => expect(lastAnalyze().get('label')).toBe('Phoenix, Arizona, United States'))
+      expect(lastAnalyze().get('latitude')).toBe('33.4484')
+      await waitFor(() => expect(screen.getByTestId('result-title')).toHaveTextContent('Phoenix'))
+    })
+
+    it('keyboard selection picks the highlighted result', async () => {
+      const user = await renderLoaded()
+      const box = screen.getByRole('combobox', { name: /search city/i })
+      await user.type(box, 'Phoe')
+      await screen.findByRole('option', { name: /Oregon/ })
+      await user.keyboard('{ArrowDown}{Enter}')
+      expect(screen.getByLabelText('Location label')).toHaveValue('Phoenix, Oregon, United States')
+      expect(screen.getByLabelText('Latitude')).toHaveValue(42.27541)
+    })
+
+    it('does not search for fewer than 2 characters and debounces typing', async () => {
+      const user = await renderLoaded()
+      const box = screen.getByRole('combobox', { name: /search city/i })
+      await user.type(box, 'P')
+      await new Promise((r) => setTimeout(r, 500))
+      expect(geocodeCalls()).toHaveLength(0)
+      await user.type(box, 'hoenix')
+      await screen.findByRole('option', { name: /Arizona/ })
+      expect(geocodeCalls()).toHaveLength(1)
+    })
+
+    it('shows a no-match message and leaves the selection alone', async () => {
+      const user = await renderLoaded()
+      await user.type(screen.getByRole('combobox', { name: /search city/i }), 'Zzqqxx')
+      expect(await screen.findByText(/No places found for “Zzqqxx”/)).toBeInTheDocument()
+      expect(screen.getByLabelText('Location label')).toHaveValue('Hyderabad')
+    })
+
+    it('shows the API error message when search fails', async () => {
+      geocodeResponder = async () =>
+        json({ error: { code: 'rate_limited', message: 'Too many requests. Limit is 60 per 60 seconds.' } }, 429)
+      const user = await renderLoaded()
+      await user.type(screen.getByRole('combobox', { name: /search city/i }), 'Phoenix')
+      expect(await screen.findByText(/Too many requests/)).toBeInTheDocument()
+      expect(screen.getByLabelText('Location label')).toHaveValue('Hyderabad')
+    })
   })
 })

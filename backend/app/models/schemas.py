@@ -337,6 +337,41 @@ class RegionsResponse(BaseModel):
     note: str
 
 
+class GeocodeQuery(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(..., description="Place name to search for, e.g. 'Phoenix'")
+    count: int = Field(5, ge=1, le=10, description="Maximum number of matches")
+
+    @field_validator("name")
+    @classmethod
+    def _clean_name(cls, v: str) -> str:
+        cleaned = sanitize_label(v)
+        if len(cleaned) < 2:
+            raise ValueError("Enter at least 2 characters to search.")
+        return cleaned
+
+
+class Place(BaseModel):
+    id: int | None = None
+    name: str
+    latitude: float
+    longitude: float
+    admin1: str | None = None
+    country: str | None = None
+    country_code: str | None = None
+    timezone: str | None = None
+    population: int | None = None
+
+
+class GeocodeResponse(BaseModel):
+    query: str
+    results: list[Place]
+    provider: str
+    attribution: str
+    cache: Literal["hit", "miss"]
+
+
 class HealthResponse(BaseModel):
     status: str
     version: str

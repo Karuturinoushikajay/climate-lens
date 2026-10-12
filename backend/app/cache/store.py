@@ -3,6 +3,7 @@
 Two logical collections are used:
 * ``observations`` - raw provider series (long TTL)
 * ``analyses``     - derived analysis results (shorter TTL, keyed with the algorithm version)
+* ``places``       - place-name search results from the geocoding API
 
 The in-memory cache is per process; with several backend instances each keeps its own copy.
 """
@@ -20,7 +21,7 @@ from typing import Any, Protocol
 
 logger = logging.getLogger(__name__)
 
-COLLECTIONS = ("observations", "analyses")
+COLLECTIONS = ("observations", "analyses", "places")
 
 
 def make_key(namespace: str, params: dict[str, Any]) -> str:

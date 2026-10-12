@@ -470,7 +470,7 @@ class AnalysisService:
     @staticmethod
     def _caveats(q: AnalysisQuery, threshold: float | None) -> list[str]:
         caveats = [
-            f"Data are {DATASET} model estimates, not weather-station observations.",
+            f"Data source: {DATASET}. Reanalysis values are model estimates, not weather-station observations.",
             "Daily maximum temperature is aggregated in the location's local time zone.",
             "Events touching the first or last day of the analysis window may be truncated by the window.",
             "Linear regression describes the observed record; it is not a forecast and its slope alone does not "

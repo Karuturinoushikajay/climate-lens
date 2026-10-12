@@ -1,4 +1,4 @@
-import type { AnalysisResponse, ApiErrorBody, HealthResponse, RegionsResponse } from './types'
+import type { AnalysisResponse, ApiErrorBody, GeocodeResponse, HealthResponse, RegionsResponse } from './types'
 
 export function normalizeBaseUrl(raw: string | undefined): string {
   let url = (raw ?? '').trim()
@@ -81,6 +81,10 @@ export async function fetchAnalysis(params: QueryParams, signal?: AbortSignal): 
 
 export async function fetchRegions(signal?: AbortSignal): Promise<RegionsResponse> {
   return parseJson(await request('/api/regions', undefined, signal))
+}
+
+export async function searchPlaces(name: string, signal?: AbortSignal): Promise<GeocodeResponse> {
+  return parseJson(await request('/api/geocode', { name, count: 6 }, signal))
 }
 
 export async function fetchHealth(signal?: AbortSignal): Promise<HealthResponse> {

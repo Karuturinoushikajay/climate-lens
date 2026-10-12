@@ -36,11 +36,14 @@ class Settings(BaseSettings):
 
     rate_limit_analyze_per_minute: int = Field(30, ge=1)
     rate_limit_export_per_minute: int = Field(10, ge=1)
+    rate_limit_geocode_per_minute: int = Field(60, ge=1)
+    geocode_cache_ttl_hours: int = Field(720, ge=1)
     trusted_proxy_hops: int | None = Field(None, ge=0, le=5)
     # Legacy switch: true means "behind Render", which appends PROXY_HOPS_WHEN_TRUSTED entries.
     trust_proxy_headers: bool = False
 
     open_meteo_archive_url: str = "https://archive-api.open-meteo.com/v1/archive"
+    open_meteo_geocoding_url: str = "https://geocoding-api.open-meteo.com/v1/search"
     upstream_timeout_seconds: float = Field(30.0, gt=0, le=120)
     upstream_max_retries: int = Field(2, ge=0, le=5)
     upstream_backoff_seconds: float = Field(0.5, ge=0)

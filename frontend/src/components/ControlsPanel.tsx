@@ -12,6 +12,7 @@ import {
   type Location,
   type Selection,
 } from '../state/selection'
+import { CitySearch } from './CitySearch'
 import { InfoTip } from './InfoTip'
 
 const HAZARDS = [
@@ -129,6 +130,10 @@ export function ControlsPanel({
   return (
     <section className="panel controls" aria-label="Analysis controls">
       <h2>Analysis setup</h2>
+
+      <CitySearch
+        onSelect={(p, label) => onLocation({ kind: 'point', latitude: p.latitude, longitude: p.longitude }, label)}
+      />
 
       <label className="field">
         <span>Preset region</span>
