@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { ApiError, buildUrl, fetchAnalysis, filenameFromDisposition } from './client'
+import { ApiError, buildUrl, fetchAnalysis, filenameFromDisposition, normalizeBaseUrl } from './client'
 
 describe('api client', () => {
   it('builds URLs with encoded query parameters', () => {
@@ -36,6 +36,24 @@ describe('api client', () => {
       }),
     )
     await expect(fetchAnalysis({})).rejects.toThrow('Too many requests. Retry in about 42 s.')
+  })
+
+  it('normalizes the configured API base URL', () => {
+    expect(normalizeBaseUrl(undefined)).toBe('http://localhost:8000')
+    expect(normalizeBaseUrl('  ')).toBe('http://localhost:8000')
+    expect(normalizeBaseUrl('climate-lens-api.onrender.com/')).toBe('https://climate-lens-api.onrender.com')
+    expect(normalizeBaseUrl('localhost:8010')).toBe('http://localhost:8010')
+    expect(normalizeBaseUrl('https://api.example.com//')).toBe('https://api.example.com')
+  })
+
+  it('explains when the API address serves HTML instead of JSON', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response('<!doctype html><html></html>', { status: 200, headers: { 'Content-Type': 'text/html' } }),
+    )
+    const err = await fetchAnalysis({}).catch((e) => e)
+    expect(err).toBeInstanceOf(ApiError)
+    expect(err.code).toBe('not_api_response')
+    expect(err.message).toContain('VITE_API_BASE_URL')
   })
 
   it('maps network failures to a friendly error', async () => {

@@ -3,6 +3,9 @@ import { describe, expect, it, vi } from 'vitest'
 import { makeAnalysis } from '../test/fixtures'
 import { useAnalysis } from './useAnalysis'
 
+const json = (body: unknown, status = 200) =>
+  new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
+
 describe('useAnalysis', () => {
   it('aborts superseded requests so a slow older response never wins', async () => {
     const aborted: string[] = []
@@ -10,7 +13,7 @@ describe('useAnalysis', () => {
       const label = new URL(String(input)).searchParams.get('label')!
       const delay = label === 'Slow' ? 200 : 10
       return new Promise((resolve, reject) => {
-        const t = setTimeout(() => resolve(new Response(JSON.stringify(makeAnalysis(label)))), delay)
+        const t = setTimeout(() => resolve(json(makeAnalysis(label))), delay)
         init?.signal?.addEventListener('abort', () => {
           clearTimeout(t)
           aborted.push(label)
@@ -33,10 +36,8 @@ describe('useAnalysis', () => {
   it('keeps the previous result available while loading and after an error', async () => {
     const fetchMock = vi
       .spyOn(globalThis, 'fetch')
-      .mockResolvedValueOnce(new Response(JSON.stringify(makeAnalysis('First'))))
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify({ error: { code: 'upstream_timeout', message: 'Timed out.' } }), { status: 504 }),
-      )
+      .mockResolvedValueOnce(json(makeAnalysis('First')))
+      .mockResolvedValueOnce(json({ error: { code: 'upstream_timeout', message: 'Timed out.' } }, 504))
     const { result } = renderHook(() => useAnalysis())
     act(() => result.current.run({ label: 'First' }))
     await waitFor(() => expect(result.current.state.status).toBe('success'))
