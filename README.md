@@ -474,7 +474,7 @@ Because of this, the MongoDB code path has only been tested against `mongomock`,
 
 ## AI-tool disclosure
 
-This project was built with **Cursor's AI coding agent**, an LLM-based assistant working inside the IDE.
+This project was built with the help of an **AI coding assistant**, an LLM-based tool working inside the IDE.
 
 - **What the agent did:**
   - Read the brief and drafted the requirements checklist and implementation plan.
