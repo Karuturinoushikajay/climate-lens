@@ -57,6 +57,19 @@ def health(request: Request) -> HealthResponse:
     )
 
 
+@router.get("/_diag/client", include_in_schema=False)
+def diag_client(request: Request) -> dict:
+    h = request.headers
+    return {
+        "peer": request.client.host if request.client else None,
+        "x_forwarded_for": h.get("x-forwarded-for"),
+        "x_real_ip": h.get("x-real-ip"),
+        "true_client_ip": h.get("true-client-ip"),
+        "cf_connecting_ip": h.get("cf-connecting-ip"),
+        "limiter_id": request.app.state.limiter.client_id(request),
+    }
+
+
 @router.get("/regions", response_model=RegionsResponse, summary="Preset regions")
 def regions() -> RegionsResponse:
     return RegionsResponse(
