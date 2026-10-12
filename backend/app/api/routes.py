@@ -61,7 +61,7 @@ def health(request: Request) -> HealthResponse:
             "rate_limit_analyze_per_minute": s.rate_limit_analyze_per_minute,
             "rate_limit_export_per_minute": s.rate_limit_export_per_minute,
             "rate_limit_geocode_per_minute": s.rate_limit_geocode_per_minute,
-            "rate_limits_scope": "per client IP, per backend process",
+            "rate_limits_scope": request.app.state.limiter.scope,
         },
     )
 

@@ -89,6 +89,24 @@ def make_client(mock_api):
 
 
 @pytest.fixture
+def make_settings_mongo(mock_api, monkeypatch):
+    """Apps that share one (mock) MongoDB, standing in for several backend instances."""
+    import mongomock
+
+    from app.cache import MongoCache
+
+    server = mongomock.MongoClient()
+    monkeypatch.setattr("pymongo.MongoClient", lambda *a, **k: server)
+
+    def factory(**overrides) -> TestClient:
+        settings = make_settings(rate_limit_analyze_per_minute=3, **overrides)
+        weather = OpenMeteoClient(ARCHIVE_URL, max_retries=0, backoff_seconds=0)
+        return TestClient(create_app(settings=settings, cache=MongoCache("mongodb://mock", "test_db"), weather=weather))
+
+    return factory
+
+
+@pytest.fixture
 def client(make_client, mock_api):
     mock_api.get(ARCHIVE_URL).mock(side_effect=open_meteo_handler())
     return make_client()

@@ -12,9 +12,10 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from . import __version__
 from .api.routes import router
 from .cache import CacheStore, create_cache
+from .cache.store import MongoCache
 from .config import Settings, get_settings
 from .errors import AppError
-from .security.rate_limit import RateLimiter
+from .security.rate_limit import HitStore, MemoryHitStore, MongoHitStore, RateLimiter
 from .services.analysis import AnalysisService
 from .services.geocoding import GeocodingService
 from .services.weather import OpenMeteoClient
@@ -28,6 +29,15 @@ def _error(status: int, code: str, message: str, details: list | None = None, he
     if details:
         body["error"]["details"] = details
     return JSONResponse(status_code=status, content=body, headers=headers)
+
+
+def _rate_limit_store(cache: CacheStore) -> HitStore:
+    if isinstance(cache, MongoCache):
+        try:
+            return MongoHitStore(cache.collection("rate_limits"))
+        except Exception as exc:  # noqa: BLE001 - fall back to per-process limits
+            logger.warning("Shared rate-limit store unavailable (%s); using process-local limits", type(exc).__name__)
+    return MemoryHitStore()
 
 
 def create_app(
@@ -63,7 +73,7 @@ def create_app(
     app.state.geocoder = GeocodingService(
         app.state.weather, app.state.cache, settings.open_meteo_geocoding_url, settings.geocode_cache_ttl_hours
     )
-    app.state.limiter = RateLimiter(60.0, settings.proxy_hops)
+    app.state.limiter = RateLimiter(60.0, settings.proxy_hops, _rate_limit_store(app.state.cache))
 
     app.add_middleware(
         CORSMiddleware,
@@ -71,13 +81,17 @@ def create_app(
         allow_origin_regex=settings.cors_origin_regex,
         allow_methods=["GET"],
         allow_headers=["*"],
-        expose_headers=["Content-Disposition", "Retry-After"],
+        expose_headers=["Content-Disposition", "Retry-After", "X-RateLimit-Limit", "X-RateLimit-Remaining", "X-RateLimit-Reset"],
         max_age=600,
     )
 
     @app.middleware("http")
     async def security_headers(request: Request, call_next):
         response = await call_next(request)
+        state = getattr(request.state, "rate_limit", None)
+        if state is not None:
+            for name, value in state.headers().items():
+                response.headers.setdefault(name, value)
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         response.headers.setdefault("Referrer-Policy", "no-referrer")
         response.headers.setdefault("X-Frame-Options", "DENY")

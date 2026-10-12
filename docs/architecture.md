@@ -53,7 +53,7 @@ flowchart LR
 ## Request flow for `/api/analyze`
 
 1. FastAPI parses the query into `AnalysisQuery`. Pydantic validation covers coordinate ranges, point-or-box exclusivity, box size, year bounds and span, reference period, supported hazard, and label sanitising. Invalid input returns `422` without contacting the provider.
-2. The per-IP sliding-window rate limiter checks the `analyze` or `export` bucket and returns `429` with `Retry-After` when the limit is exceeded.
+2. The per-IP sliding-window rate limiter checks the `analyze`, `export` or `geocode` bucket and returns `429` with `Retry-After` when the limit is exceeded. The client IP comes from a fixed position counted from the right of `X-Forwarded-For` (`TRUSTED_PROXY_HOPS`). With MongoDB configured, hits are recorded in the shared `rate_limits` collection by one atomic update; every response carries `X-RateLimit-*` headers.
 3. `AnalysisService` derives the sample points: the point itself for point queries, or up to a 2x2 grid of cell centres for a box. It then builds the analysis cache key from the points, years, hazard, percentile, minimum duration, baseline mode and reference years, completeness rule, label, and `ALGORITHM_VERSION`.
 4. **Analysis cache hit:** the stored document is validated against the response model. It is only returned if its `algorithm_version` matches the current one.
 5. **Cache miss:** observations are fetched per date range.
@@ -75,4 +75,4 @@ flowchart LR
 
 - MongoDB TTL indexes (`expires_at`, `expireAfterSeconds: 0`) remove expired documents. Reads also check `expires_at`, because the TTL monitor runs only about once a minute.
 - If MongoDB is unreachable at startup, the app falls back to the in-memory cache and `/api/health` reports this. If MongoDB fails at runtime, the operation is logged, treated as a cache miss, and health reports `healthy: false`.
-- The in-memory cache and the rate limiter are **per process**. With several backend instances, each has its own cache and its own rate-limit counters. For a scaled deployment, Redis would provide a shared cache (with `SETEX` for TTL) and a coordinated limiter (for example, a sliding window with `INCR` and `EXPIRE`, or a token bucket in a Lua script).
+- The in-memory cache is **per process**. The rate limiter is shared through MongoDB when it is configured, so several instances, overlapping deploys and restarts all see the same counts; without MongoDB, or if a MongoDB call fails, it falls back to per-process counters. Redis would give lower latency for both (`SETEX` for the cache, a sorted-set sliding window for the limiter).

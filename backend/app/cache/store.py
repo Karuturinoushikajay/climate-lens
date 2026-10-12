@@ -124,6 +124,9 @@ class MongoCache:
         except PyMongoError as exc:
             self._mark_error(exc)
 
+    def collection(self, name: str) -> Any:
+        return self._db[name]
+
     def _mark_error(self, exc: Exception) -> None:
         self._healthy = False
         self._last_error = type(exc).__name__

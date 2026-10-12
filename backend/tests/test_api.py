@@ -259,6 +259,45 @@ def test_rate_limit_without_proxy_ignores_forwarded_for(make_client, mock_api):
     assert c.get("/api/analyze", params=q(), headers={"X-Forwarded-For": "2.2.2.2"}).status_code == 429
 
 
+def test_rate_limit_headers_on_every_response(make_client, mock_api):
+    mock_api.get(ARCHIVE_URL).mock(side_effect=open_meteo_handler())
+    c = make_client(rate_limit_analyze_per_minute=3)
+    remaining = []
+    for _ in range(3):
+        r = c.get("/api/analyze", params=q())
+        assert r.status_code == 200 and r.headers["x-ratelimit-limit"] == "3"
+        assert 1 <= int(r.headers["x-ratelimit-reset"]) <= 60
+        remaining.append(r.headers["x-ratelimit-remaining"])
+    assert remaining == ["2", "1", "0"]
+    r = c.get("/api/analyze", params=q())
+    assert r.status_code == 429 and r.headers["x-ratelimit-remaining"] == "0"
+    assert "x-ratelimit-limit" not in c.get("/api/health").headers
+
+
+def test_rate_limit_shared_across_instances_via_mongodb(make_settings_mongo, mock_api):
+    mock_api.get(ARCHIVE_URL).mock(side_effect=open_meteo_handler())
+    first, second = make_settings_mongo(), make_settings_mongo()
+    statuses = [c.get("/api/analyze", params=q()).status_code for c in (first, second, first, second, first)]
+    assert statuses == [200, 200, 200, 429, 429]
+    assert "MongoDB" in first.get("/api/health").json()["limits"]["rate_limits_scope"]
+
+
+def test_mongo_rate_limit_falls_back_when_store_fails():
+    from pymongo.errors import PyMongoError
+
+    from app.security.rate_limit import MongoHitStore
+
+    class Broken:
+        def create_index(self, *a, **k):
+            pass
+
+        def find_one_and_update(self, *a, **k):
+            raise PyMongoError("down")
+
+    store = MongoHitStore(Broken())
+    assert [store.hit("k", 2, 60, 1000.0 + i)[0] for i in range(3)] == [True, True, False]
+
+
 @pytest.mark.parametrize(
     "overrides, hops",
     [({}, 0), ({"trust_proxy_headers": True}, 3), ({"trust_proxy_headers": True, "trusted_proxy_hops": 2}, 2)],

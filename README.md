@@ -13,7 +13,7 @@ Climate Lens detects heatwaves in historical daily maximum temperature data and 
 The backend is on Render's free tier and sleeps when idle, so the first request after a pause can take up to a minute.
 
 > **Status, stated honestly**
-> - **Implemented and tested:** the full analysis pipeline, the API, CSV and PDF exports, the dashboard, and the map. 112 backend tests and 47 frontend tests pass.
+> - **Implemented and tested:** the full analysis pipeline, the API, CSV and PDF exports, the dashboard, and the map. 115 backend tests and 47 frontend tests pass.
 > - **Verified locally:** the backend and frontend dev servers, run against the live Open-Meteo API.
 > - **Not yet verified:** the Docker Compose stack. Docker Desktop's Linux engine could not start on the development machine because WSL has no distributions installed. The Compose file validates with `docker compose config`, but the containers were not built or run.
 > - **Deployed and verified live (12 October 2026):** frontend on Vercel, backend on Render, cache on MongoDB Atlas (free M0). Live checks passed for CORS from the Vercel origin, a Hyderabad 1990-2025 analysis, the CSV download, and the PDF download. `/api/health` reports `"mode": "mongodb"`, and a repeated Delhi 2000-2024 analysis went from a cache miss (3.9 s) to a MongoDB cache hit (1.1 s).
@@ -208,7 +208,7 @@ Every error has the shape `{"error": {"code", "message", "details?"}}`, with the
 | Status | Meaning |
 | --- | --- |
 | 422 | Validation failed |
-| 429 | Rate limit exceeded (`Retry-After` header set) |
+| 429 | Rate limit exceeded (`Retry-After` header set). Every rate-limited endpoint also returns `X-RateLimit-Limit`, `X-RateLimit-Remaining` and `X-RateLimit-Reset` (seconds). |
 | 502 | Provider returned a malformed response or rejected the request |
 | 503 | Provider is down or its quota is exhausted |
 | 504 | Provider timed out |
@@ -307,7 +307,7 @@ Insights quote the adjusted p-value, α and the number of years. A significant r
   - Exports reuse the cached analysis.
 - **Expiry:** MongoDB TTL indexes remove expired documents, and reads also re-check `expires_at`.
 - **Fallback:** if MongoDB is unreachable at startup, the app uses a process-local LRU+TTL memory cache, and `/api/health` reports which mode is active. If a MongoDB operation fails at runtime, it is treated as a cache miss.
-- **Scaling caveat:** the memory cache and the rate limiter are **per process**, so separate instances don't share them. For horizontal scaling, use Redis for a shared cache and a coordinated rate limiter; see [docs/architecture.md](docs/architecture.md).
+- **Scaling caveat:** the memory cache is **per process**. With MongoDB configured, the rate limiter is shared (see below); without it, the limiter is also per process. See [docs/architecture.md](docs/architecture.md).
 
 ## Security and performance
 
@@ -315,7 +315,10 @@ Insights quote the adjusted p-value, α and the number of years. A significant r
 - Strict validation of coordinates, box size, year range and span, reference period, hazard, and label length, with control characters stripped.
 - Extra query parameters are rejected.
 
-**Rate limiting:** a per-IP sliding window, configurable, returning `429` with `Retry-After`. Analysis and export requests have separate buckets.
+**Rate limiting:** a per-IP 60-second sliding window, configurable, returning `429` with `Retry-After`. Analysis, export and city-search requests have separate buckets.
+- **Shared store:** with MongoDB configured, hit times live in a `rate_limits` collection (TTL-indexed). Each request is checked and recorded in one atomic update, so the limit holds across several instances, overlapping deploys and restarts. If MongoDB fails, that request falls back to the per-process limiter. `/api/health` reports the scope in `limits.rate_limits_scope`.
+- **Client identity:** the client IP is read `TRUSTED_PROXY_HOPS` entries from the right of `X-Forwarded-For`, so a client cannot choose its own identity by sending that header.
+- **Visibility:** every rate-limited response carries `X-RateLimit-Limit`, `X-RateLimit-Remaining` and `X-RateLimit-Reset`.
 
 **Calls to Open-Meteo**
 - 30 s timeout.
@@ -342,7 +345,7 @@ Insights quote the adjusted p-value, α and the number of years. A significant r
 Run them yourself:
 
 ```bash
-cd backend && python -m pytest          # 112 tests
+cd backend && python -m pytest          # 115 tests
 cd frontend && npm test                 # 47 tests (Vitest + React Testing Library)
 cd frontend && npm run build            # type-check + production build
 ```
@@ -351,7 +354,7 @@ Results recorded on 12 October 2026 (Windows 11, Python 3.14.4, Node 25.9):
 
 | Suite | Result |
 | --- | --- |
-| Backend `pytest` | **112 passed** |
+| Backend `pytest` | **115 passed** |
 | Frontend `vitest run` | **47 passed** (4 files) |
 | Frontend `tsc -b && vite build` | Passed |
 | Frontend `oxlint` | No warnings |
@@ -374,7 +377,7 @@ What the backend tests cover (Open-Meteo is mocked with `respx`, so no network i
   - Health and regions endpoints, and valid point, box, and fixed-baseline analyses
   - Validation of coordinates, reversed years, over-long windows, unsupported hazards, conflicting point and box input, and over-long labels
   - Provider 500, timeout, 429, 400, and malformed responses, plus not caching failed fetches
-  - Cache hits and misses, rate limits, and CORS
+  - Cache hits and misses, rate limits (spoofed X-Forwarded-For ignored, rate-limit headers, a limit shared by two app instances through MongoDB, and fallback when the store fails), and CORS
   - CSV headers and content, the formula-injection guard, PDF validity and page numbers, and PDF markup escaping
   - **A cross-check that dashboard JSON, CSV rows, and PDF text agree for the same request**
   - City search: parsing, empty results, case-insensitive caching, skipping results without valid coordinates, validation, provider failures (not cached), and its rate limit
@@ -467,7 +470,7 @@ The MongoDB code path is covered by `mongomock` tests and has been verified agai
 - No multiple-testing correction across the three indicators (stated in the UI and insights).
 - Regression on count data assumes linear, homoscedastic behaviour.
 
-**Scaling:** the in-memory cache and rate limits are per process.
+**Scaling:** the in-memory cache is per process. Rate limits are shared only when MongoDB is configured.
 
 **Provider quota:** heavy use of uncached multi-decade or box queries can exhaust Open-Meteo's free quota. The API then returns `503 upstream_rate_limited`.
 
@@ -479,7 +482,7 @@ The MongoDB code path is covered by `mongomock` tests and has been verified agai
 - Field significance or false-discovery-rate control across indicators and regions.
 - Drought (SPI/SPEI) and heavy-rainfall (R95p, Rx1day) hazards behind the existing hazard parameter.
 - Area-weighted box averages using the provider's native grid, plus administrative boundary polygons (GeoJSON).
-- Redis for a shared cache and rate limiting, and background prefetching of preset regions.
+- Redis for a lower-latency shared cache and rate limiter, and background prefetching of preset regions.
 - End-to-end browser tests (Playwright) and visual regression tests for the PDF.
 
 ## AI-tool disclosure
