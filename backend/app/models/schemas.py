@@ -224,6 +224,7 @@ class AnnualOut(BaseModel):
     missing_days: int
     completeness: float
     sufficient_data: bool
+    received_days: int = 0
     interpolated_days: int = 0
     duplicate_dates: int = 0
     implausible_days: int = 0
@@ -246,6 +247,7 @@ class EventOut(BaseModel):
     mean_excess_c: float
     start_year: int
     year_contributions: list[YearDays]
+    filled_days: int = Field(0, description="Interpolated days inside the event (gap fill only)")
 
 
 class RegressionOut(BaseModel):
@@ -307,23 +309,34 @@ class TrendsOut(BaseModel):
 
 
 class QualityBlock(BaseModel):
-    expected_days: int
-    provided_days: int
+    expected_days: int = Field(description="Calendar days in the window")
+    received_days: int = Field(description="Distinct dates the provider returned inside the window")
+    provided_days: int = Field(description="Same as received_days (kept for compatibility)")
     valid_days: int
-    missing_days: int
-    missing_dates: int
+    missing_days: int = Field(description="Days without a usable value: absent + null + implausible")
+    missing_dates: int = Field(description="Calendar dates the provider did not return")
     null_values: int
     implausible_values: int
-    duplicate_dates: int
-    interpolated_days: int = 0
+    duplicate_dates: int = Field(description="Extra rows for already-returned dates (first value kept)")
+    interpolated_days: int = Field(0, description="Subset of the missing days filled by single-day gap fill")
     outlier_days: int = 0
     completeness: float
+    accounting_ok: bool = Field(
+        description="received = valid + null + implausible and calendar = valid + absent + null + implausible"
+    )
+    accounting: str
 
 
 class OutlierDay(BaseModel):
     date: str
     tmax_c: float
     robust_z: float
+
+
+class FilledDay(BaseModel):
+    date: str
+    tmax_c: float
+    reason: str = Field(description="Original flag of the filled day: missing_date, null or implausible")
 
 
 class DataQualityOut(BaseModel):
@@ -335,6 +348,9 @@ class DataQualityOut(BaseModel):
     gap_fill: str = Field("off", description="'off' or 'single-day linear'")
     outlier_method: str = ""
     outlier_dates: list[OutlierDay] = Field(default_factory=list, description="Up to 20 most extreme flagged days")
+    outlier_total: int = Field(0, description="All flagged outlier days; outlier_dates may be a truncated list")
+    filled_dates: list[FilledDay] = Field(default_factory=list, description="Up to 50 interpolated days")
+    filled_total: int = 0
 
 
 class AnalysisResponse(BaseModel):

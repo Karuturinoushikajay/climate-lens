@@ -16,9 +16,10 @@ ANNUAL_COLUMNS = [
     ("mean_tmax_c", "Mean daily max temperature (C)"),
     ("max_tmax_c", "Highest daily max temperature (C)"),
     ("mean_excess_c", "Mean excess over threshold on heatwave days (C)"),
-    ("valid_days", "Valid observation days"),
     ("expected_days", "Calendar days"),
-    ("missing_days", "Missing days"),
+    ("received_days", "Days received from source"),
+    ("valid_days", "Valid observation days"),
+    ("missing_days", "Unusable days (missing + implausible)"),
     ("interpolated_days", "Interpolated days (gap fill)"),
     ("duplicate_dates", "Duplicate dates"),
     ("implausible_days", "Implausible values"),
@@ -71,12 +72,16 @@ def build_csv(result: AnalysisResponse) -> str:
         ("Data retrieved at (UTC)", r.source.retrieved_at),
         ("Analysis completeness (fraction)", qa.completeness),
         ("Calendar days", qa.expected_days),
+        ("Days received from source", qa.received_days),
         ("Valid observed days", qa.valid_days),
-        ("Missing days", qa.missing_days),
-        ("Interpolated days", qa.interpolated_days),
-        ("Duplicate dates", qa.duplicate_dates),
+        ("Missing days (absent + null)", qa.missing_dates + qa.null_values),
+        ("Absent dates", qa.missing_dates),
+        ("Null values", qa.null_values),
         ("Implausible values", qa.implausible_values),
+        ("Duplicate dates", qa.duplicate_dates),
+        ("Interpolated days", qa.interpolated_days),
         ("Statistical outlier days (flagged, kept)", qa.outlier_days),
+        ("Accounting check", ("OK: " if qa.accounting_ok else "MISMATCH: ") + qa.accounting),
         ("Gap fill", dq.gap_fill),
         ("Outlier method", dq.outlier_method),
         ("Algorithm version", r.algorithm_version),
@@ -84,6 +89,14 @@ def build_csv(result: AnalysisResponse) -> str:
     ]
     for k, v in meta:
         writer.writerow(["#", safe_cell(k), safe_cell(v)])
+    for f in dq.filled_dates:
+        writer.writerow(["#", "Filled day (date, value C, original flag)", f.date, safe_cell(f.tmax_c), f.reason])
+    if dq.filled_total > len(dq.filled_dates):
+        writer.writerow(["#", "Filled days listed", f"{len(dq.filled_dates)} of {dq.filled_total}"])
+    for o in dq.outlier_dates:
+        writer.writerow(["#", "Outlier day (date, value C, robust z)", o.date, safe_cell(o.tmax_c), safe_cell(o.robust_z)])
+    if dq.outlier_dates:
+        writer.writerow(["#", "Outlier days listed", f"{len(dq.outlier_dates)} of {dq.outlier_total}"])
     writer.writerow([])
     writer.writerow([header for _, header in ANNUAL_COLUMNS])
     for row in r.annual:

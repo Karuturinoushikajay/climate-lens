@@ -160,9 +160,9 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   content: attr(data-tip); position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%);
   width: 240px; padding: 8px 10px; border-radius: 8px; background: #0b1210; border: 1px solid var(--border);
   color: var(--text); font-size: 0.75rem; font-weight: 400; line-height: 1.4; text-transform: none; letter-spacing: 0;
-  opacity: 0; pointer-events: none; transition: opacity 0.15s; z-index: 20;
+  display: none; pointer-events: none; z-index: 20;
 }
-.info-tip:hover::after, .info-tip:focus::after { opacity: 1; }
+.info-tip:hover::after, .info-tip:focus::after { display: block; }
 
 .table-scroll { overflow-x: auto; max-height: 480px; overflow-y: auto; margin-top: 8px; border: 1px solid var(--border); border-radius: 10px; }
 table { border-collapse: collapse; width: 100%; font-size: 0.84rem; font-variant-numeric: tabular-nums; }
@@ -174,7 +174,13 @@ tr.insufficient { color: var(--muted); }
 .badge { margin-left: 6px; font-size: 0.7rem; padding: 1px 6px; border-radius: 999px; background: var(--amber-dim); color: var(--amber); }
 
 .dq-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
-.dq-counts { list-style: none; margin: 12px 0 0; padding: 0; display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; }
+.dq-counts { list-style: none; margin: 12px 0 0; padding: 0; display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; }
+.dq-accounting { margin: 10px 0 0; font-size: 0.82rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.dq-accounting.ok span { color: var(--mint); font-weight: 700; }
+.dq-accounting.bad { color: var(--danger); }
+td.filled-cell { color: var(--amber); font-weight: 600; }
+.defaults-note summary { cursor: pointer; }
+.defaults-note ul { margin: 6px 0 0; padding-left: 20px; }
 .dq-counts li { background: var(--panel-2); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 2px; }
 .dq-counts li .fine { margin: 0; }
 .dq-value { font-size: 1.3rem; font-weight: 700; font-variant-numeric: tabular-nums; }
@@ -212,4 +218,5 @@ tr.insufficient { color: var(--muted); }
   .card-value { font-size: 1.3rem; }
   .topbar { padding: 10px 12px; }
   .status-pill { display: none; }
+  .info-tip::after { width: min(240px, calc(100vw - 32px)); }
 }

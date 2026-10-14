@@ -131,6 +131,22 @@ def test_build_daily_series_quality_counts():
     assert q.valid_days == 2
     assert records[0].tmax == 10.0  # first duplicate kept
     assert q.completeness == pytest.approx(0.4)
+    assert q.received_days == 4  # distinct in-window dates; duplicate and out-of-range rows excluded
+    assert q.accounting_ok
+
+
+@pytest.mark.parametrize("fill", [False, True])
+def test_quality_counts_always_add_up(fill):
+    start, end = date(2001, 1, 1), date(2001, 1, 10)
+    dates = ["2001-01-01", "2001-01-02", "2001-01-02", "2001-01-03", "2001-01-05", "2001-01-06",
+             "2001-01-07", "2001-01-08", "2001-01-10", "2000-12-31"]
+    values = [20.0, 21.0, 99.0, None, 22.0, 80.0, 23.0, 24.0, 25.0, 19.0]
+    _, q = build_daily_series(dates, values, start, end, fill_single_gaps=fill)
+    assert (q.missing_dates, q.null_values, q.implausible_values, q.duplicate_dates) == (2, 1, 1, 1)
+    assert q.received_days == 8 == q.valid_days + q.null_values + q.implausible_values
+    assert q.expected_days == q.valid_days + q.absent_or_null_days + q.implausible_values
+    assert q.valid_days <= q.received_days
+    assert q.accounting_ok
 
 
 def test_missing_values_are_never_zero_filled():
@@ -236,7 +252,8 @@ def test_implausible_day_is_filled_only_when_opted_in():
 
 def test_interpolated_day_completes_a_run_but_not_the_threshold():
     records, _ = _filled([COOL, HOT, None, HOT, COOL])
-    assert len(detect_events(records, T)) == 1
+    events = detect_events(records, T)
+    assert len(events) == 1 and events[0].filled_days == 1
     observed = [r.tmax for r in records if r.observed]
     assert observed == [COOL, HOT, HOT, COOL]
     assert records[2].filled_from == "null"
@@ -255,6 +272,7 @@ def test_annual_counts_interpolated_duplicates_and_implausible():
     assert a.duplicate_dates == 1
     assert a.valid_days == 363
     assert a.missing_days == 2
+    assert a.received_days == 365
 
 
 def _seasonal_years(years: int = 5) -> list[float | None]:

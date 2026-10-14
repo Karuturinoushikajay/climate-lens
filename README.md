@@ -10,10 +10,10 @@ Climate Lens detects heatwaves in historical daily maximum temperature data and 
 **Live demo:** https://climate-lens-gamma.vercel.app
 **API:** https://climate-lens-api.onrender.com/api/health (interactive docs at [/docs](https://climate-lens-api.onrender.com/docs))
 
-The backend is on Render's free tier and sleeps when idle, so the first request after a pause can take up to a minute.
+The backend is on Render's free tier, which sleeps after 15 idle minutes; a cold start measured on 14 October 2026 took 21 s. A scheduled GitHub Actions job ([`keep-warm.yml`](.github/workflows/keep-warm.yml)) pings `/api/health` every 10 minutes to keep it awake, and if a request still takes longer than 3 s the UI shows "Waking the server, this can take about 30 s".
 
 > **Status, stated honestly**
-> - **Implemented and tested:** the full analysis pipeline, the API, CSV and PDF exports, the dashboard, and the map. 142 backend tests and 60 frontend tests pass.
+> - **Implemented and tested:** the full analysis pipeline, the API, CSV and PDF exports, the dashboard, and the map. 148 backend tests and 65 frontend tests pass.
 > - **Verified locally:** the backend and frontend dev servers, run against the live Open-Meteo API.
 > - **Not yet verified:** the Docker Compose stack. Docker Desktop's Linux engine could not start on the development machine because WSL has no distributions installed. The Compose file validates with `docker compose config`, but the containers were not built or run.
 > - **Deployed and verified live (12 October 2026):** frontend on Vercel, backend on Render, cache on MongoDB Atlas (free M0). Live checks passed for CORS from the Vercel origin, a Hyderabad 1990-2025 analysis, the CSV download, and the PDF download. `/api/health` reports `"mode": "mongodb"`, and a repeated Delhi 2000-2024 analysis went from a cache miss (3.9 s) to a MongoDB cache hit (1.1 s).
@@ -31,7 +31,7 @@ The seven numbered sections follow the order the brief asks for.
   - [API](#api) · [Caching](#caching) · [Security and performance](#security-and-performance)
 - [3. Data sources](#3-data-sources)
 - [4. Hazard logic](#4-hazard-logic)
-  - [Heatwave definition](#heatwave-definition) · [Percentile baseline](#percentile-baseline) · [Data quality](#data-quality) · [Annual accounting](#annual-accounting) · [Trend statistics](#trend-statistics) · [How results are worded](#how-results-are-worded)
+  - [Heatwave definition](#heatwave-definition) · [Why these defaults](#why-these-defaults) · [Percentile baseline](#percentile-baseline) · [Data quality](#data-quality) · [Annual accounting](#annual-accounting) · [Trend statistics](#trend-statistics) · [How results are worded](#how-results-are-worded)
 - [5. Assumptions](#5-assumptions)
 - [6. Improvements](#6-improvements)
   - [Known limitations](#known-limitations) · [Future improvements](#future-improvements)
@@ -55,13 +55,13 @@ The seven numbered sections follow the order the brief asks for.
 **Dashboard**
 - A limitations note directly under the results header (reanalysis is not station data, percentile thresholds are relative to each location, significance is not causation)
 - Summary cards
-- A data-quality report: missing, interpolated, duplicate, implausible and outlier days, a per-year breakdown, and the most extreme flagged days
+- A data-quality report: days received from the source, missing, implausible, duplicate, interpolated and outlier days, a check that the counts add up, a per-year breakdown, the filled days, and the most extreme flagged days (with "showing 20 of N" when the list is cut off)
 - Annual heatwave-day and event-count charts, each with a 5-year rolling mean and a linear fit
 - An annual Tmax chart with the threshold line
 - Data-driven trend interpretation, with the p-value next to every headline change
 - A statistics panel with regression and Mann-Kendall results, including tooltips
-- A methodology panel
-- A year-by-year table
+- A methodology panel, including "Why these defaults?"
+- A year-by-year table, with a "Filled" column and a note on events that contain a filled day when gap fill is on
 - Sources and limitations
 
 **Exports:** server-generated CSV and PDF reports for exactly the analysis shown on screen, including the hazard settings and the data-quality counts (run totals and per year).
@@ -69,7 +69,7 @@ The seven numbered sections follow the order the brief asks for.
 **Robustness**
 - Validation, rate limiting, timeouts, and bounded retries
 - Uniform JSON errors
-- Loading, empty, error, and retry states in the UI
+- Loading, empty, error, and retry states in the UI, plus a "Waking the server" message for any request slower than 3 s
 - Protection against stale results being shown for a different selection
 
 ## 1. Setup
@@ -147,17 +147,17 @@ All settings come from environment variables; see [.env.example](.env.example). 
 Run them yourself:
 
 ```bash
-cd backend && python -m pytest          # 142 tests
-cd frontend && npm test                 # 60 tests (Vitest + React Testing Library)
+cd backend && python -m pytest          # 148 tests
+cd frontend && npm test                 # 65 tests (Vitest + React Testing Library)
 cd frontend && npm run build            # type-check + production build
 ```
 
-Results recorded on 12 October 2026 (Windows 11, Python 3.14.4, Node 25.9):
+Results recorded on 14 October 2026 (Windows 11, Python 3.14.4, Node 25.9):
 
 | Suite | Result |
 | --- | --- |
-| Backend `pytest` | **142 passed** |
-| Frontend `vitest run` | **60 passed** (5 files) |
+| Backend `pytest` | **148 passed** |
+| Frontend `vitest run` | **65 passed** (5 files) |
 | Frontend `tsc -b && vite build` | Passed |
 | Frontend `oxlint` | No warnings |
 | Live smoke test against the real Open-Meteo API | Passed. Point analyses for Hyderabad (1990-2025) and Delhi (1995-2024) returned complete data, a valid CSV, and a valid 5-page PDF. A Telangana box (2015-2024) sampled 4 grid points with no excluded years. |
@@ -173,7 +173,7 @@ What the backend tests cover (Open-Meteo is mocked with `respx`, so no network i
   - Threshold equality
   - Percentile interpolation, repeated values, and empty or single-value datasets
   - Separation of annual event counts from annual heatwave days
-- **Data quality:** gap fill off by default; single-day gaps filled and flagged, two-day gaps and edge gaps left missing; interpolated days excluded from the threshold and completeness; per-year interpolated, duplicate and implausible counts; outliers flagged but kept; small windows and zero-MAD windows skipped.
+- **Data quality:** the counts always add up (received = valid + null + implausible; calendar = valid + missing + implausible), with and without gap fill; days received never below valid days or negative, including a single year inside the reference period; gap fill off by default; single-day gaps filled and flagged, two-day gaps and edge gaps left missing; interpolated days excluded from the threshold and completeness; per-year interpolated, duplicate and implausible counts; outliers flagged but kept; small windows and zero-MAD windows skipped.
 - **Regression:** zero-baseline percentage handling, insufficient points, and constant series.
 - **Mann-Kendall:** increasing, decreasing, and constant series; ties; missing values; too few points; invalid values; hand-computed p-values; the effect of alpha; and the Hamed-Rao adjustment.
 - **Insights:** every headline change (percentage, slope, mean Tmax change) carries "statistically significant" or "not statistically significant" with its p-value.
@@ -194,7 +194,9 @@ What the frontend tests cover:
 - Debounced manual coordinate entry that never triggers an analysis by itself
 - Year validation, reversed reference years (ordering error only), the fixed baseline, and loading and disabled states
 - Percentile and minimum-days controls: values sent, results labelled, out-of-range days rejected
-- The gap-fill checkbox (off by default, sent only when ticked) and the data-quality report
+- The gap-fill checkbox (off by default, sent only when ticked), the "Filled" column and filled-event note, and the data-quality report (days received, the accounting check, "showing 2 of 22" for a cut-off outlier list)
+- The "Waking the server" message after 3 s and its removal when the response arrives
+- The "Why these defaults?" note
 - The limitations note and its link to the sources list
 - The API error banner and Retry
 - CSV and PDF downloads that use the displayed analysis, and export failures
@@ -228,6 +230,8 @@ The live demo was deployed with the steps below, including MongoDB Atlas.
 1. Import the repository in Vercel and set the **Root Directory** to `frontend`. The framework is Vite and `vercel.json` is included.
 2. Add the environment variable `VITE_API_BASE_URL=https://<service>.onrender.com`.
 3. Deploy. Then update `ALLOWED_ORIGINS` on Render to the exact Vercel production URL and redeploy the backend. Vercel also gives every deployment its own URL; `ALLOWED_ORIGIN_REGEX` in `render.yaml` allows those for this project's Vercel team.
+
+**Keeping the free backend awake.** [`.github/workflows/keep-warm.yml`](.github/workflows/keep-warm.yml) runs every 10 minutes and requests `/api/health`, which touches neither Open-Meteo nor the rate limits. GitHub runs schedules on a best-effort basis (runs can be late or skipped) and disables them after 60 days without repository activity; one always-on free service uses about 744 of Render's 750 free instance hours a month. A free external monitor such as UptimeRobot on the same URL is a more punctual alternative.
 
 Netlify works too: base directory `frontend`, build command `npm run build`, publish directory `dist`, the same environment variable, and a SPA redirect `/* /index.html 200`.
 
@@ -416,6 +420,15 @@ Each item below is either **[Brief]**, a requirement taken from the case-study b
 
 A missing day breaks a run, unless the optional single-day gap fill is on (see [Data quality](#data-quality)).
 
+### Why these defaults
+
+- **95th percentile.** Keeps hot days rare (about 18 a year in the reference climate), so events describe extremes rather than ordinary summer heat. It is also the brief's example. The 90th percentile is common in the heatwave literature, which is why it is one of the selectable options.
+- **3 consecutive days.** A common minimum duration in heatwave definitions and the brief's example. It separates sustained heat, which is what drives health and infrastructure impacts, from single hot days.
+- **1991-2020 baseline.** The current WMO 30-year climate normal. A fixed baseline gives every analysis period the same threshold, so a 1966-1970 run and a 2015-2024 run can be compared directly.
+- **What these defaults give up.** One annual threshold is simple and transparent but not seasonal, so heatwaves are mostly a pre-monsoon or summer phenomenon; a day-of-year threshold is listed under [Future improvements](#future-improvements).
+
+The same note appears in the UI under "Why these defaults?" in the methodology panel.
+
 ### Percentile baseline
 
 **[Assumption]**
@@ -429,10 +442,11 @@ A missing day breaks a run, unless the optional single-day gap fill is on (see [
 **[Assumption]** Every run reports its data quality in the API (`data_quality` and per-year fields in `annual[]`), the UI (data-quality report), the CSV (metadata rows and per-year columns) and the PDF (summary table and per-year table).
 
 - **Calendar alignment:** the provider series is re-indexed onto a complete calendar from 1 January of the start year to 31 December of the end year.
+- **Counts that add up.** "Days received" is the number of distinct dates the source returned inside the window (duplicate rows and dates outside the window are not counted), so it can never be negative or below the valid days. Two identities hold for every run and are checked in code: **received = valid + null + implausible**, and **calendar days = valid + missing (absent + null) + implausible**. The check is shown as a line in the data-quality panel, as an "Accounting check" row in the CSV and the PDF, and as `accounting_ok` / `accounting` in the API. Interpolated days are a subset of the missing and implausible days, not an extra category.
 - **Missing:** dates absent from the provider, nulls, NaN or non-numeric values, and implausible values (outside -60 to 60 °C) all count as missing. Each category is counted separately. A missing temperature is **never** replaced with zero.
 - **Duplicates:** duplicate dates keep the first value and are counted, in total and per year.
-- **Gap fill (off by default):** with `fill_gaps=true` (the "Fill single-day gaps" checkbox), an isolated one-day gap between two observed days is set to the mean of its neighbours. Gaps of two or more days, and gaps at the start or end of the window, are left missing. Filled days are flagged `interpolated` and counted, in total and per year. They can complete a heatwave run, but they never enter the percentile threshold, completeness, or the annual mean and maximum. A caveat is added to the results whenever gap fill is on, and it has its own cache key.
-- **Outliers (flagged, not removed):** each observed value is compared with all observed values within ±15 calendar days of the same date across the analysis period. The robust z-score is \(z = 0.6745\,(x-\tilde{x})/\mathrm{MAD}\); days with \(|z| > 4\) are flagged and counted, and the 20 most extreme are listed with their date, value and z. Windows with fewer than 30 values or zero MAD are skipped. Outliers stay in the analysis because genuine heat extremes are also unusual; the flag is for review.
+- **Gap fill (off by default):** with `fill_gaps=true` (the "Fill single-day gaps" checkbox), an isolated one-day gap between two observed days is set to the mean of its neighbours. Gaps of two or more days, and gaps at the start or end of the window, are left missing. Filled days are flagged `interpolated` and counted, in total and per year. They can complete a heatwave run, but they never enter the percentile threshold, completeness, or the annual mean and maximum. A caveat is added to the results whenever gap fill is on, and it has its own cache key. Filled days are visible wherever results appear: a "Filled" column in the year table, a note naming the heatwave events that contain a filled day (each event carries `filled_days`), the list of filled dates with their value and original flag (panel, CSV rows, PDF), and method text in the PDF that states the fill rule instead of "any missing day breaks the run".
+- **Outliers (flagged, not removed):** each observed value is compared with all observed values within ±15 calendar days of the same date across the analysis period. The robust z-score is \(z = 0.6745\,(x-\tilde{x})/\mathrm{MAD}\); days with \(|z| > 4\) are flagged and counted, and the 20 most extreme are listed with their date, value and z. When more are flagged, the panel, CSV and PDF say so ("showing 20 of 22"). Windows with fewer than 30 values or zero MAD are skipped. Outliers stay in the analysis because genuine heat extremes are also unusual; the flag is for review.
 - **Rejected responses:** unexpected units, misaligned arrays, or invalid dates cause the whole response to be rejected with a `502`.
 - **Completeness rule:** a year is used in trend statistics only if at least 80% of its days have an observed value. Excluded years are listed in the response, the UI, and the PDF.
 

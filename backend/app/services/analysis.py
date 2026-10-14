@@ -44,6 +44,7 @@ from ..models.schemas import (
     CacheOut,
     DataQualityOut,
     EventOut,
+    FilledDay,
     GridPointOut,
     HazardOut,
     IndicatorTrendOut,
@@ -65,6 +66,7 @@ logger = logging.getLogger(__name__)
 
 ROLLING_WINDOW_YEARS = 5
 MAX_OUTLIER_DATES = 20
+MAX_FILLED_DATES = 50
 OBSERVATION_SCHEMA = "obs-v1"
 
 
@@ -87,7 +89,8 @@ def sample_points(q: AnalysisQuery) -> list[tuple[float, float]]:
 def _quality_block(q: DataQuality) -> QualityBlock:
     return QualityBlock(
         expected_days=q.expected_days,
-        provided_days=q.provided_days - q.out_of_range_dates,
+        received_days=q.received_days,
+        provided_days=q.received_days,
         valid_days=q.valid_days,
         missing_days=q.missing_days,
         missing_dates=q.missing_dates,
@@ -97,6 +100,14 @@ def _quality_block(q: DataQuality) -> QualityBlock:
         interpolated_days=q.interpolated_days,
         outlier_days=q.outlier_days,
         completeness=round(q.completeness, 6),
+        accounting_ok=q.accounting_ok,
+        accounting=(
+            f"{q.expected_days} calendar days = {q.valid_days} valid + {q.absent_or_null_days} missing "
+            f"({q.missing_dates} absent, {q.null_values} null) + {q.implausible_values} implausible; "
+            f"{q.received_days} received from the source = {q.valid_days} valid + {q.null_values} null + "
+            f"{q.implausible_values} implausible"
+            + (f" ({q.duplicate_dates} duplicate rows ignored)" if q.duplicate_dates else "")
+        ),
     )
 
 
@@ -261,6 +272,7 @@ class AnalysisService:
             duplicates_by_year=quality.duplicates_by_year,
         )
         outliers = sorted((r for r in records if r.outlier), key=lambda r: -abs(r.outlier_z or 0))[:MAX_OUTLIER_DATES]
+        filled = [r for r in records if r.flag == "interpolated"]
 
         label = q.label or self._default_label(q)
         trends, raw_trends = self._trends(annual)
@@ -338,6 +350,7 @@ class AnalysisService:
                     mean_excess_c=round(e.mean_excess_c, 2),
                     start_year=e.start_year,
                     year_contributions=[YearDays(year=y, days=d) for y, d in e.year_contributions.items()],
+                    filled_days=e.filled_days,
                 )
                 for e in events
             ],
@@ -354,6 +367,12 @@ class AnalysisService:
                     OutlierDay(date=r.day.isoformat(), tmax_c=round(r.tmax, 2), robust_z=r.outlier_z)  # type: ignore[arg-type]
                     for r in outliers
                 ],
+                outlier_total=quality.outlier_days,
+                filled_dates=[
+                    FilledDay(date=r.day.isoformat(), tmax_c=round(r.tmax, 2), reason=r.filled_from or "")  # type: ignore[arg-type]
+                    for r in filled[:MAX_FILLED_DATES]
+                ],
+                filled_total=len(filled),
             ),
             insights=insights,
             caveats=self._caveats(q, threshold),
@@ -460,6 +479,7 @@ class AnalysisService:
                 missing_days=a.missing_days,
                 completeness=round(a.completeness, 4),
                 sufficient_data=a.sufficient_data,
+                received_days=a.received_days,
                 interpolated_days=a.interpolated_days,
                 duplicate_dates=a.duplicate_dates,
                 implausible_days=a.implausible_days,

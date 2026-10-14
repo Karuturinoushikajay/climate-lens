@@ -7,6 +7,7 @@ function Quality({ title, q }: { title: string; q: QualityBlock }) {
       <h4>{title}</h4>
       <dl>
         <div className="stat-row"><dt>Calendar days</dt><dd>{q.expected_days}</dd></div>
+        <div className="stat-row"><dt>Days received</dt><dd>{q.received_days ?? q.provided_days}</dd></div>
         <div className="stat-row"><dt>Valid values</dt><dd>{q.valid_days}</dd></div>
         <div className="stat-row"><dt>Missing dates</dt><dd>{q.missing_dates}</dd></div>
         <div className="stat-row"><dt>Null values</dt><dd>{q.null_values}</dd></div>
@@ -46,6 +47,28 @@ export function MethodologyPanel({ data }: { data: AnalysisResponse }) {
             trend statistics
             {q.insufficient_years.length ? ` (excluded: ${q.insufficient_years.join(', ')})` : ' (none excluded)'}.
           </p>
+          <details className="defaults-note fine" data-testid="defaults-note">
+            <summary>Why these defaults?</summary>
+            <ul>
+              <li>
+                <strong>95th percentile:</strong> keeps hot days rare (about 18 a year in the reference climate), so events
+                describe extremes rather than ordinary summer heat. 90th is also common in the literature and can be
+                selected.
+              </li>
+              <li>
+                <strong>3 consecutive days:</strong> a common minimum duration in heatwave definitions; it separates
+                sustained heat, which drives health impacts, from single hot days. 2 to 10 days can be selected.
+              </li>
+              <li>
+                <strong>1991–2020 baseline:</strong> the current WMO 30-year climate normal. A fixed baseline gives every
+                analysis period the same threshold, so periods can be compared.
+              </li>
+              <li>
+                <strong>One annual threshold:</strong> simple and transparent, but not seasonal; a day-of-year threshold
+                is listed as a future improvement.
+              </li>
+            </ul>
+          </details>
         </div>
         <Quality title="Analysis period data" q={q.analysis} />
         {q.reference && <Quality title="Reference period data" q={q.reference} />}

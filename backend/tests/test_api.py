@@ -111,10 +111,35 @@ def test_fill_gaps_is_opt_in_flagged_and_keyed(make_client, mock_api):
     assert any("gap fill is on" in c for c in on["caveats"])
 
 
+def test_filled_days_are_visible_in_events_and_lists(make_client, mock_api):
+    nulls = {date(2000, 6, 5), date(2001, 7, 1), date(2001, 7, 2)}
+    mock_api.get(ARCHIVE_URL).mock(side_effect=open_meteo_handler(nulls))
+    client = make_client()
+    on = client.get("/api/analyze", params=q(start_year=2000, end_year=2005, fill_gaps="true")).json()
+    dq = on["data_quality"]
+    assert dq["filled_total"] == 1
+    assert dq["filled_dates"][0]["date"] == "2000-06-05" and dq["filled_dates"][0]["reason"] == "null"
+    assert all("filled_days" in e for e in on["events"])
+    assert sum(e["filled_days"] for e in on["events"]) <= 1
+    rows, meta = _parse_csv(client.get("/api/export.csv", params=q(start_year=2000, end_year=2005, fill_gaps="true")).text)
+    assert any(m.startswith("#,\"Filled day (date, value C, original flag)\",2000-06-05,") for m in meta)
+
+
+@pytest.mark.parametrize("start, end, expected", [(2020, 2020, 366), (2000, 2024, 9132), (1966, 1970, 1826)])
+def test_received_days_never_negative_or_below_valid(client, mock_api, start, end, expected):
+    a = client.get("/api/analyze", params=q(start_year=start, end_year=end)).json()["data_quality"]["analysis"]
+    assert a["received_days"] == a["provided_days"] == expected
+    assert a["valid_days"] <= a["received_days"] <= a["expected_days"]
+    assert a["received_days"] == a["valid_days"] + a["null_values"] + a["implausible_values"]
+    assert a["expected_days"] == a["received_days"] + a["missing_dates"]
+    assert a["accounting_ok"] is True and f"{expected} received from the source" in a["accounting"]
+
+
 def test_quality_reports_outliers_and_method(client, mock_api):
     dq = client.get("/api/analyze", params=q(start_year=2000, end_year=2005)).json()["data_quality"]
     assert "MAD" in dq["outlier_method"]
-    assert dq["analysis"]["outlier_days"] == len(dq["outlier_dates"]) or len(dq["outlier_dates"]) == 20
+    assert dq["outlier_total"] == dq["analysis"]["outlier_days"]
+    assert len(dq["outlier_dates"]) == min(dq["outlier_total"], 20)
     assert all(abs(o["robust_z"]) > 4 for o in dq["outlier_dates"])
 
 
@@ -441,7 +466,9 @@ def test_csv_export(client):
     rows, meta = _parse_csv(r.text)
     assert [int(x["Year"]) for x in rows] == list(range(2000, 2011))
     assert any("Hyderabad" in m for m in meta)
-    assert {"Heatwave days", "Heatwave events (counted in start year)", "Missing days"} <= set(rows[0])
+    assert {"Heatwave days", "Heatwave events (counted in start year)", "Unusable days (missing + implausible)"} <= set(rows[0])
+    assert "Days received from source" in rows[0]
+    assert any(m.startswith('#,Accounting check,"OK: ') for m in meta)
     assert {"Interpolated days (gap fill)", "Duplicate dates", "Implausible values"} <= set(rows[0])
     assert "Statistical outlier days (flagged, kept)" in rows[0]
     assert "#,95th percentile threshold (C)," in "\n".join(meta)
@@ -469,6 +496,10 @@ def test_exports_follow_configured_hazard(make_client, mock_api):
     assert "Interpolated days (gap fill) 1" in text
     assert "Annual data quality" in text
     assert "at least 2 consecutive hot days" in text
+    assert "any missing day breaks the run" not in text
+    assert "single-day gap between two observed days is filled and flagged" in text
+    assert "Filled days (showing 1 of 1)" in text
+    assert "Accounting check OK" in text
 
 
 def test_csv_formula_injection_is_neutralised(client):

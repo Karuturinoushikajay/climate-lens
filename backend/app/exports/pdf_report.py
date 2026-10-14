@@ -280,14 +280,16 @@ def build_pdf(r: AnalysisResponse) -> bytes:
     qa = q.analysis
     dq_rows: list[list[object]] = [
         ["Calendar days in window", qa.expected_days],
+        ["Days received from source", qa.received_days],
         ["Valid daily values", qa.valid_days],
-        ["Missing days (total)", qa.missing_days],
+        ["Missing days (absent + null)", qa.missing_dates + qa.null_values],
         ["Dates absent from provider", qa.missing_dates],
         ["Null values from provider", qa.null_values],
         [f"Implausible values (outside {q.plausible_range_c[0]:g} to {q.plausible_range_c[1]:g} °C)", qa.implausible_values],
         ["Duplicate dates", qa.duplicate_dates],
         ["Interpolated days (gap fill)", qa.interpolated_days],
         ["Statistical outlier days (flagged, kept)", qa.outlier_days],
+        ["Accounting check", ("OK: " if qa.accounting_ok else "MISMATCH: ") + qa.accounting],
         ["Gap fill", q.gap_fill],
         ["Completeness", f"{qa.completeness * 100:.2f}%"],
         ["Minimum completeness for a year to enter trends", f"{q.min_year_completeness * 100:.0f}%"],
@@ -295,19 +297,28 @@ def build_pdf(r: AnalysisResponse) -> bytes:
     ]
     if q.reference:
         dq_rows.append(["Reference-period completeness", f"{q.reference.completeness * 100:.2f}%"])
-    story.append(_table([[wrap(a), b] for a, b in dq_rows], [90 * mm, 84 * mm], header=False))
+    story.append(_table([[wrap(a), wrap(b) if isinstance(b, str) else b] for a, b in dq_rows], [90 * mm, 84 * mm], header=False))
     if q.outlier_method:
         story.append(Spacer(1, 3))
         story.append(P(f"Outlier method: {q.outlier_method}.", "small"))
     if q.outlier_dates:
         listed = "; ".join(f"{o.date} ({o.tmax_c:.1f} °C, z {o.robust_z:+.1f})" for o in q.outlier_dates)
-        story.append(P(f"Most extreme flagged days: {listed}.", "small"))
+        story.append(
+            P(f"Most extreme flagged days (showing {len(q.outlier_dates)} of {q.outlier_total}): {listed}.", "small")
+        )
+    if q.filled_dates:
+        listed = "; ".join(f"{f.date} ({f.tmax_c:.1f} °C, was {f.reason.replace('_', ' ')})" for f in q.filled_dates)
+        story.append(P(f"Filled days (showing {len(q.filled_dates)} of {q.filled_total}): {listed}.", "small"))
 
     story.append(Paragraph("Annual data quality", s["h2"]))
-    rows = [["Year", "Valid", "Missing", "Interpolated", "Duplicates", "Implausible", "Outliers"]]
+    rows = [["Year", "Received", "Valid", "Missing", "Implausible", "Filled", "Duplicates", "Outliers"]]
     for a in r.annual:
-        rows.append([a.year, a.valid_days, a.missing_days, a.interpolated_days, a.duplicate_dates, a.implausible_days, a.outlier_days])
+        rows.append([
+            a.year, a.received_days, a.valid_days, a.missing_days - a.implausible_days, a.implausible_days,
+            a.interpolated_days, a.duplicate_dates, a.outlier_days,
+        ])
     story.append(_table(rows))
+    story.append(P("Calendar days = valid + missing + implausible. Filled days are a subset of the missing and implausible days.", "small"))
 
     story.append(Paragraph("Methodology, limitations and statistical caveats", s["h2"]))
     filled = (
@@ -317,7 +328,12 @@ def build_pdf(r: AnalysisResponse) -> bytes:
     )
     method = [
         "Daily maximum 2 m air temperature is retrieved from the Open-Meteo Historical Weather API and aligned to a complete calendar. Missing dates, null values and implausible values are kept as missing. " + filled,
-        f"A hot day is a valid day whose maximum temperature is strictly greater than the threshold. A heatwave is a run of at least {r.hazard.min_duration_days} consecutive hot days; any missing day breaks the run.",
+        f"A hot day is a valid day whose maximum temperature is strictly greater than the threshold. A heatwave is a run of at least {r.hazard.min_duration_days} consecutive hot days; "
+        + (
+            "an isolated single-day gap between two observed days is filled and flagged, and any longer gap breaks the run."
+            if q.gap_fill != "off"
+            else "any missing day breaks the run."
+        ),
         "Events are counted once, in the year they start. Heatwave days are attributed to the calendar year in which each day falls, and a year's longest event is the longest single-event contribution to that year.",
         "Percentage changes compare the mean of the first and last five qualifying years and are omitted when the early-period mean is zero.",
     ]

@@ -129,6 +129,7 @@ export function makeAnalysis(label = 'Hyderabad', lat = 17.385, lon = 78.4867, s
     data_quality: {
       analysis: {
         expected_days: 1096,
+        received_days: 1096,
         provided_days: 1096,
         valid_days: 1096,
         missing_days: 0,
@@ -139,6 +140,8 @@ export function makeAnalysis(label = 'Hyderabad', lat = 17.385, lon = 78.4867, s
         interpolated_days: 0,
         outlier_days: 2,
         completeness: 1,
+        accounting_ok: true,
+        accounting: '1096 calendar days = 1096 valid + 0 missing + 0 implausible',
       },
       reference: null,
       min_year_completeness: 0.8,
@@ -150,6 +153,9 @@ export function makeAnalysis(label = 'Hyderabad', lat = 17.385, lon = 78.4867, s
         { date: `${start + 1}-01-14`, tmax_c: 12.3, robust_z: -5.2 },
         { date: `${start + 1}-04-02`, tmax_c: 44.9, robust_z: 4.4 },
       ],
+      outlier_total: 2,
+      filled_dates: [],
+      filled_total: 0,
     },
     insights: [`${label}: 7 heatwave event(s) totalling 31 heatwave day(s) were detected between ${start} and ${end}.`],
     caveats: ['Data are ERA5-family reanalysis estimates served by Open-Meteo, not weather-station observations.'],

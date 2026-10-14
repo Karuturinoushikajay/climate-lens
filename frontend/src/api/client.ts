@@ -50,16 +50,47 @@ async function toApiError(response: Response): Promise<ApiError> {
   return new ApiError(response.status, code, message)
 }
 
-async function request(path: string, params?: QueryParams, signal?: AbortSignal): Promise<Response> {
-  let response: Response
-  try {
-    response = await fetch(buildUrl(path, params), { signal, headers: { Accept: 'application/json' } })
-  } catch (err) {
-    if ((err as Error).name === 'AbortError') throw err
-    throw new ApiError(0, 'network_error', 'Could not reach the Climate Lens API. Check your connection and try again.')
+export const SLOW_REQUEST_MS = 3000
+
+let slowRequests = 0
+const slowListeners = new Set<() => void>()
+
+function changeSlow(delta: number) {
+  slowRequests += delta
+  slowListeners.forEach((listener) => listener())
+}
+
+export function subscribeSlowRequests(listener: () => void): () => void {
+  slowListeners.add(listener)
+  return () => {
+    slowListeners.delete(listener)
   }
-  if (!response.ok) throw await toApiError(response)
-  return response
+}
+
+export function hasSlowRequest(): boolean {
+  return slowRequests > 0
+}
+
+async function request(path: string, params?: QueryParams, signal?: AbortSignal): Promise<Response> {
+  let slow = false
+  const timer = setTimeout(() => {
+    slow = true
+    changeSlow(1)
+  }, SLOW_REQUEST_MS)
+  try {
+    let response: Response
+    try {
+      response = await fetch(buildUrl(path, params), { signal, headers: { Accept: 'application/json' } })
+    } catch (err) {
+      if ((err as Error).name === 'AbortError') throw err
+      throw new ApiError(0, 'network_error', 'Could not reach the Climate Lens API. Check your connection and try again.')
+    }
+    if (!response.ok) throw await toApiError(response)
+    return response
+  } finally {
+    clearTimeout(timer)
+    if (slow) changeSlow(-1)
+  }
 }
 
 async function parseJson<T>(response: Response): Promise<T> {

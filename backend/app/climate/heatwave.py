@@ -71,7 +71,24 @@ class DataQuality:
 
     @property
     def missing_days(self) -> int:
+        """Calendar days without a usable observed value (absent, null or implausible)."""
         return self.expected_days - self.valid_days
+
+    @property
+    def received_days(self) -> int:
+        """Distinct calendar dates the provider returned inside the window."""
+        return self.expected_days - self.missing_dates
+
+    @property
+    def absent_or_null_days(self) -> int:
+        return self.missing_dates + self.null_values
+
+    @property
+    def accounting_ok(self) -> bool:
+        return (
+            self.received_days == self.valid_days + self.null_values + self.implausible_values
+            and self.expected_days == self.valid_days + self.absent_or_null_days + self.implausible_values
+        )
 
     @property
     def completeness(self) -> float:
@@ -87,6 +104,7 @@ class HeatwaveEvent:
     mean_tmax: float
     mean_excess_c: float
     year_contributions: dict[int, int] = field(default_factory=dict)
+    filled_days: int = 0
 
     @property
     def start_year(self) -> int:
@@ -107,6 +125,7 @@ class AnnualIndicator:
     missing_days: int
     completeness: float
     sufficient_data: bool
+    received_days: int = 0
     interpolated_days: int = 0
     duplicate_dates: int = 0
     implausible_days: int = 0
@@ -195,6 +214,7 @@ def build_daily_series(
         interpolated_days=interpolated,
         duplicates_by_year=dict(duplicates_by_year),
     )
+    assert quality.accounting_ok, "daily quality counts do not add up"
     return records, quality
 
 
@@ -285,6 +305,7 @@ def detect_events(
                     mean_tmax=sum(temps) / len(temps),
                     mean_excess_c=sum(t - threshold for t in temps) / len(temps),
                     year_contributions=dict(sorted(contributions.items())),
+                    filled_days=sum(1 for r in run if r.flag == "interpolated"),
                 )
             )
         run.clear()
@@ -359,6 +380,7 @@ def annual_indicators(
                 missing_days=expected - len(valid),
                 completeness=completeness,
                 sufficient_data=completeness >= min_completeness,
+                received_days=sum(1 for r in rows if "missing_date" not in (r.flag, r.filled_from)),
                 interpolated_days=sum(1 for r in rows if r.flag == "interpolated"),
                 duplicate_dates=(duplicates_by_year or {}).get(year, 0),
                 implausible_days=sum(1 for r in rows if "implausible" in (r.flag, r.filled_from)),

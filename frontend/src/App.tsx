@@ -13,6 +13,7 @@ import { SummaryCards } from './components/SummaryCards'
 import { EventFrequencyChart, HeatwaveDaysChart, TemperatureChart } from './components/TrendCharts'
 import { YearTable } from './components/YearTable'
 import { useAnalysis } from './hooks/useAnalysis'
+import { useSlowRequests } from './hooks/useSlowRequests'
 import {
   DEFAULT_MAX_YEAR,
   DEFAULT_SELECTION,
@@ -33,6 +34,7 @@ export default function App() {
   const [presetsError, setPresetsError] = useState<string | null>(null)
   const [health, setHealth] = useState<HealthResponse | null>(null)
   const { state, run } = useAnalysis()
+  const slow = useSlowRequests()
 
   const maxYear = health?.limits.max_year ?? DEFAULT_MAX_YEAR
   const currentParams = useMemo(() => toQueryParams(selection), [selection])
@@ -170,8 +172,21 @@ export default function App() {
 
         {loading && (
           <div className="banner info" role="status">
-            <RefreshCw size={16} className="spin" aria-hidden /> Fetching historical data and running the analysis…
-            {shown && ' Previous results remain visible below until the new analysis finishes.'}
+            <RefreshCw size={16} className="spin" aria-hidden />
+            <span>
+              Fetching historical data and running the analysis…
+              {shown && ' Previous results remain visible below until the new analysis finishes.'}
+            </span>
+          </div>
+        )}
+
+        {slow && (
+          <div className="banner warn" role="status" data-testid="wake-note">
+            <RefreshCw size={16} className="spin" aria-hidden />
+            <span>
+              Waking the server, this can take about 30 s. The free hosting tier sleeps when idle; later requests are
+              fast.
+            </span>
           </div>
         )}
 
@@ -193,9 +208,11 @@ export default function App() {
           <div className={`results ${loading ? 'dimmed' : ''}`} aria-busy={loading}>
             {stale && !loading && (
               <div className="banner warn" role="status">
-                <AlertTriangle size={16} aria-hidden /> The selection has changed. Results below still describe{' '}
-                <strong>{shown.data.region.label}</strong> ({shown.data.period.start_year}–{shown.data.period.end_year}).
-                Run the analysis to update.
+                <AlertTriangle size={16} aria-hidden />
+                <span>
+                  The selection has changed. Results below still describe <strong>{shown.data.region.label}</strong> (
+                  {shown.data.period.start_year}–{shown.data.period.end_year}). Run the analysis to update.
+                </span>
               </div>
             )}
 

@@ -119,6 +119,7 @@ export interface AnnualRow {
   missing_days: number
   completeness: number
   sufficient_data: boolean
+  received_days?: number
   interpolated_days?: number
   duplicate_dates?: number
   implausible_days?: number
@@ -136,10 +137,12 @@ export interface HeatwaveEvent {
   mean_excess_c: number
   start_year: number
   year_contributions: { year: number; days: number }[]
+  filled_days?: number
 }
 
 export interface QualityBlock {
   expected_days: number
+  received_days?: number
   provided_days: number
   valid_days: number
   missing_days: number
@@ -150,12 +153,20 @@ export interface QualityBlock {
   interpolated_days?: number
   outlier_days?: number
   completeness: number
+  accounting_ok?: boolean
+  accounting?: string
 }
 
 export interface OutlierDay {
   date: string
   tmax_c: number
   robust_z: number
+}
+
+export interface FilledDay {
+  date: string
+  tmax_c: number
+  reason: string
 }
 
 export interface AnalysisResponse {
@@ -219,6 +230,9 @@ export interface AnalysisResponse {
     gap_fill?: string
     outlier_method?: string
     outlier_dates?: OutlierDay[]
+    outlier_total?: number
+    filled_dates?: FilledDay[]
+    filled_total?: number
   }
   insights: string[]
   caveats: string[]

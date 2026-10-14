@@ -28,6 +28,26 @@ function defaultAnalyze(url: URL): Promise<Response> {
   if (p.get('fill_gaps') === 'true') {
     body.data_quality.gap_fill = 'single-day linear'
     body.data_quality.analysis.interpolated_days = 3
+    body.data_quality.filled_total = 3
+    body.data_quality.filled_dates = [
+      { date: `${body.period.start_year}-05-10`, tmax_c: 41.2, reason: 'null' },
+      { date: `${body.period.start_year}-07-02`, tmax_c: 30.1, reason: 'missing_date' },
+    ]
+    body.annual[0].interpolated_days = 3
+    body.annual[0].missing_days = 3
+    body.events = [
+      {
+        start: `${body.period.start_year}-05-08`,
+        end: `${body.period.start_year}-05-12`,
+        duration_days: 5,
+        peak_tmax_c: 43,
+        mean_tmax_c: 42,
+        mean_excess_c: 1.5,
+        start_year: body.period.start_year,
+        year_contributions: [{ year: body.period.start_year, days: 5 }],
+        filled_days: 1,
+      },
+    ]
   }
   return Promise.resolve(json(body))
 }
@@ -382,6 +402,68 @@ describe('App', () => {
     await waitFor(() => expect(lastAnalyze().get('fill_gaps')).toBe('true'))
     await waitFor(() => expect(screen.getByTestId('dq-interpolated')).toHaveTextContent('3'))
     expect(screen.getByTestId('result-hazard')).toHaveTextContent('single-day gaps filled')
+    const start = Number(lastAnalyze().get('start_year'))
+    expect(screen.getByTestId(`filled-${start}`)).toHaveTextContent('3')
+    expect(screen.getByTestId('filled-note')).toHaveTextContent(`1 heatwave event includes a filled day (${start}-05-08)`)
+    expect(screen.getByTestId('dq-filled-summary')).toHaveTextContent('Filled days (showing 2 of 3)')
+  })
+
+  it('shows no Filled column while gap fill is off', async () => {
+    await renderLoaded()
+    const table = screen.getByRole('region', { name: 'Annual indicators table' })
+    expect(within(table).queryByRole('columnheader', { name: 'Filled' })).not.toBeInTheDocument()
+    expect(screen.queryByTestId('filled-note')).not.toBeInTheDocument()
+  })
+
+  it('shows the quality accounting check and days received', async () => {
+    await renderLoaded()
+    expect(screen.getByTestId('dq-received')).toHaveTextContent('1,096')
+    const check = screen.getByTestId('dq-accounting')
+    expect(check).toHaveClass('ok')
+    expect(check).toHaveTextContent('1,096 calendar days = 1,096 valid + 0 missing + 0 implausible')
+    expect(check).toHaveTextContent('1,096 received = 1,096 valid + 0 null + 0 implausible')
+  })
+
+  it('says when the outlier list is truncated', async () => {
+    analyzeResponder = async (url) => {
+      const body = (await (await defaultAnalyze(url)).json()) as ReturnType<typeof makeAnalysis>
+      body.data_quality.outlier_total = 22
+      body.data_quality.analysis.outlier_days = 22
+      return json(body)
+    }
+    await renderLoaded()
+    expect(screen.getByTestId('dq-outlier-summary')).toHaveTextContent('Most extreme flagged days (showing 2 of 22)')
+  })
+
+  it('explains the default choices', async () => {
+    await renderLoaded()
+    const note = screen.getByTestId('defaults-note')
+    expect(note).toHaveTextContent('Why these defaults?')
+    expect(note).toHaveTextContent('95th percentile')
+    expect(note).toHaveTextContent('1991–2020 baseline')
+  })
+
+  it('shows a wake-up message when a request takes longer than 3 s', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      let release: () => void = () => undefined
+      analyzeResponder = (url) =>
+        new Promise((resolve) => {
+          release = () => resolve(defaultAnalyze(url))
+        })
+      render(<App />)
+      expect(screen.queryByTestId('wake-note')).not.toBeInTheDocument()
+      await act(async () => {
+        vi.advanceTimersByTime(3100)
+      })
+      expect(screen.getByTestId('wake-note')).toHaveTextContent('Waking the server, this can take about 30 s')
+      await act(async () => {
+        release()
+      })
+      await waitFor(() => expect(screen.queryByTestId('wake-note')).not.toBeInTheDocument())
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('shows the data quality report with counts, per-year flags and outliers', async () => {
