@@ -1,5 +1,7 @@
 # Climate Lens: Climate Hazard Trend Analyzer
 
+[![CI](https://github.com/Karuturinoushikajay/climate-lens/actions/workflows/ci.yml/badge.svg)](https://github.com/Karuturinoushikajay/climate-lens/actions/workflows/ci.yml)
+
 Climate Lens detects heatwaves, heavy-rainfall events and dry spells (drought) in historical daily weather data and analyses how their frequency, duration, and intensity have changed for a chosen place and period. It was built for the Dygnify Ventures Full-Stack Developer case study.
 
 - **Frontend:** React 19, TypeScript, Vite, Recharts, React Leaflet, Lucide icons
@@ -163,6 +165,7 @@ Results recorded on 14 October 2026 (Windows 11, Python 3.14.4, Node 25.9):
 | Frontend `vitest run` | **69 passed** (5 files) |
 | Frontend `tsc -b && vite build` | Passed |
 | Frontend `oxlint` | No warnings |
+| GitHub Actions [CI](.github/workflows/ci.yml) (Ubuntu, Python 3.12, Node 22, matching the Dockerfiles) | Runs on every push to `main` and on pull requests: backend `pytest`, then frontend lint, tests and build. Passed on its first run. |
 | Live smoke test against the real Open-Meteo API | Passed. Point analyses for Hyderabad (1990-2025) and Delhi (1995-2024) returned complete data, a valid CSV, and a valid 5-page PDF. A Telangana box (2015-2024) sampled 4 grid points with no excluded years. Heavy rainfall for Mumbai (1990-2024) and drought for Jaipur (1990-2024) returned complete precipitation data, counts that add up, a valid CSV and a valid PDF. |
 | `docker compose config` | Valid |
 | `docker compose up --build` | **Not run.** The Docker engine was unavailable (see limitations). |
