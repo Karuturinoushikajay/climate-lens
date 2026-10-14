@@ -6,6 +6,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from ..climate.hazards import HAZARDS, SUPPORTED_HAZARDS
 from ..config import (
     MAX_ANALYSIS_SPAN_YEARS,
     MAX_BOX_SPAN_DEGREES,
@@ -15,9 +16,10 @@ from ..config import (
     latest_complete_year,
 )
 
-SUPPORTED_HAZARDS = ("heatwave",)
 ALLOWED_PERCENTILES = (90.0, 92.5, 95.0, 97.5, 99.0)
-MIN_RUN_DAYS, MAX_RUN_DAYS = 2, 10
+DURATION_HELP = "; ".join(
+    f"{k} {lo}-{hi} (default {d})" for k, (lo, hi, d) in ((k, s.duration_bounds) for k, s in HAZARDS.items())
+)
 BaselineMode = Literal["analysis_period", "fixed_reference"]
 
 
@@ -43,18 +45,23 @@ class AnalysisQuery(BaseModel):
     start_year: int = Field(1990, description="First calendar year of the analysis window")
     end_year: int = Field(2020, description="Last calendar year of the analysis window")
     label: str | None = Field(None, max_length=200, description=f"Display name (truncated to {MAX_LABEL_LENGTH} chars)")
-    hazard: str = Field("heatwave", max_length=40, description="Hazard type. Only 'heatwave' is implemented.")
+    hazard: str = Field("heatwave", max_length=40, description=f"Hazard type: {', '.join(SUPPORTED_HAZARDS)}")
     baseline: BaselineMode = Field(
-        "fixed_reference", description="Percentile baseline mode; defaults to the fixed 1991-2020 reference period"
+        "fixed_reference", description="Baseline mode for the threshold / normal; defaults to the fixed 1991-2020 reference period"
     )
     reference_start_year: int = Field(1991, description="Reference period start (fixed_reference only)")
     reference_end_year: int = Field(2020, description="Reference period end (fixed_reference only)")
-    percentile: float = Field(95.0, description=f"Heatwave threshold percentile; one of {', '.join(f'{p:g}' for p in ALLOWED_PERCENTILES)}")
-    min_duration_days: int = Field(
-        3, ge=MIN_RUN_DAYS, le=MAX_RUN_DAYS, description="Minimum number of consecutive hot days that make a heatwave"
+    percentile: float = Field(
+        95.0,
+        description=f"Threshold percentile for heatwave (Tmax) and heavy_rainfall (wet days); ignored for drought. "
+        f"One of {', '.join(f'{p:g}' for p in ALLOWED_PERCENTILES)}",
+    )
+    min_duration_days: int | None = Field(
+        None, description=f"Minimum run length in days; per hazard: {DURATION_HELP}"
     )
     fill_gaps: bool = Field(
-        False, description="Fill isolated one-day gaps with the mean of the neighbouring days (flagged and counted)"
+        False,
+        description="Fill isolated one-day gaps with the mean of the neighbouring days (flagged and counted; heatwave only)",
     )
 
     @field_validator("percentile")
@@ -98,6 +105,15 @@ class AnalysisQuery(BaseModel):
                 raise ValueError(f"Box sides must not exceed {MAX_BOX_SPAN_DEGREES:g} degrees.")
         elif not has_point or any(v is None for v in point):
             raise ValueError("Both latitude and longitude are required.")
+
+        spec = HAZARDS[self.hazard]
+        lo, hi, default = spec.duration_bounds
+        if self.min_duration_days is None:
+            self.min_duration_days = default
+        elif not lo <= self.min_duration_days <= hi:
+            raise ValueError(f"min_duration_days must be between {lo} and {hi} for {self.hazard}.")
+        if self.fill_gaps and not spec.supports_gap_fill:
+            raise ValueError("fill_gaps is only available for the heatwave hazard (precipitation gaps are not interpolated).")
 
         max_year = latest_complete_year()
         for name, year in (("start_year", self.start_year), ("end_year", self.end_year)):
@@ -161,17 +177,26 @@ class PeriodOut(BaseModel):
 
 class HazardOut(BaseModel):
     type: str
+    name: str = ""
     definition: str
-    percentile: float
+    percentile: float | None = Field(description="Threshold percentile; null for drought")
     min_duration_days: int
     comparison: str
+    variable: str = "temperature_2m_max"
+    units: str = "°C"
+    labels: dict[str, str] = Field(default_factory=dict, description="Display labels for the hazard's indicators")
 
 
 class BaselineOut(BaseModel):
     mode: str
     reference_start_year: int
     reference_end_year: int
-    threshold_c: float | None
+    threshold_c: float | None = Field(description="Heatwave threshold in °C; null for precipitation hazards")
+    threshold_value: float | None = Field(None, description="Threshold in the hazard's units")
+    threshold_units: str = "°C"
+    normal_annual_total_mm: float | None = Field(
+        None, description="Mean annual precipitation over the baseline years (precipitation hazards)"
+    )
     percentile_method: str
     valid_days_used: int
     note: str
@@ -206,6 +231,8 @@ class SummaryOut(BaseModel):
     longest_event_end: str | None
     peak_tmax_c: float | None
     mean_tmax_c: float | None
+    peak_daily_mm: float | None = None
+    mean_annual_total_mm: float | None = None
     years_analyzed: int
     years_used_for_trends: int
     excluded_years: list[int]
@@ -219,6 +246,10 @@ class AnnualOut(BaseModel):
     mean_tmax_c: float | None
     max_tmax_c: float | None
     mean_excess_c: float | None
+    total_mm: float | None = None
+    max_daily_mm: float | None = Field(None, description="Wettest day of the year (Rx1day)")
+    event_total_mm: float | None = Field(None, description="Rain on heavy-rain days (R95pTOT-style)")
+    percent_of_normal: float | None = Field(None, description="Annual total as % of the baseline normal")
     valid_days: int
     expected_days: int
     missing_days: int
@@ -242,9 +273,11 @@ class EventOut(BaseModel):
     start: str
     end: str
     duration_days: int
-    peak_tmax_c: float
-    mean_tmax_c: float
-    mean_excess_c: float
+    peak_tmax_c: float | None
+    mean_tmax_c: float | None
+    mean_excess_c: float | None
+    peak_value: float | None = Field(None, description="Peak daily value in the hazard's units")
+    total_value: float | None = Field(None, description="Sum over the event (precipitation hazards, mm)")
     start_year: int
     year_contributions: list[YearDays]
     filled_days: int = Field(0, description="Interpolated days inside the event (gap fill only)")
@@ -344,7 +377,8 @@ class DataQualityOut(BaseModel):
     reference: QualityBlock | None
     min_year_completeness: float
     insufficient_years: list[int]
-    plausible_range_c: list[float]
+    plausible_range_c: list[float] = Field(description="Plausible value range (in plausible_range_units)")
+    plausible_range_units: str = "°C"
     gap_fill: str = Field("off", description="'off' or 'single-day linear'")
     outlier_method: str = ""
     outlier_dates: list[OutlierDay] = Field(default_factory=list, description="Up to 20 most extreme flagged days")

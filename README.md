@@ -1,11 +1,11 @@
 # Climate Lens: Climate Hazard Trend Analyzer
 
-Climate Lens detects heatwaves in historical daily maximum temperature data and analyses how their frequency, duration, and intensity have changed for a chosen place and period. It was built for the Dygnify Ventures Full-Stack Developer case study.
+Climate Lens detects heatwaves, heavy-rainfall events and dry spells (drought) in historical daily weather data and analyses how their frequency, duration, and intensity have changed for a chosen place and period. It was built for the Dygnify Ventures Full-Stack Developer case study.
 
 - **Frontend:** React 19, TypeScript, Vite, Recharts, React Leaflet, Lucide icons
 - **Backend:** Python, FastAPI, Pydantic, HTTPX, NumPy, ReportLab
 - **Storage:** MongoDB with TTL indexes, falling back to an in-process cache
-- **Data:** [Open-Meteo Historical Weather API](https://open-meteo.com/en/docs/historical-weather-api), daily `temperature_2m_max` from the ECMWF ERA5 reanalysis (`models=era5`, 0.25° grid). The dataset is named in the results header, the CSV metadata and the PDF.
+- **Data:** [Open-Meteo Historical Weather API](https://open-meteo.com/en/docs/historical-weather-api), daily `temperature_2m_max` (heatwave) and `precipitation_sum` (heavy rainfall, drought) from the ECMWF ERA5 reanalysis (`models=era5`, 0.25° grid). The dataset is named in the results header, the CSV metadata and the PDF.
 
 **Live demo:** https://climate-lens-gamma.vercel.app
 **API:** https://climate-lens-api.onrender.com/api/health (interactive docs at [/docs](https://climate-lens-api.onrender.com/docs))
@@ -13,7 +13,7 @@ Climate Lens detects heatwaves in historical daily maximum temperature data and 
 The backend is on Render's free tier, which sleeps after 15 idle minutes; a cold start measured on 14 October 2026 took 21 s. A scheduled GitHub Actions job ([`keep-warm.yml`](.github/workflows/keep-warm.yml)) pings `/api/health` every 10 minutes to keep it awake, and if a request still takes longer than 3 s the UI shows "Waking the server, this can take about 30 s".
 
 > **Status, stated honestly**
-> - **Implemented and tested:** the full analysis pipeline, the API, CSV and PDF exports, the dashboard, and the map. 148 backend tests and 65 frontend tests pass.
+> - **Implemented and tested:** the full analysis pipeline, the API, CSV and PDF exports, the dashboard, and the map, for all three hazards (heatwave, heavy rainfall, drought). 170 backend tests and 69 frontend tests pass.
 > - **Verified locally:** the backend and frontend dev servers, run against the live Open-Meteo API.
 > - **Not yet verified:** the Docker Compose stack. Docker Desktop's Linux engine could not start on the development machine because WSL has no distributions installed. The Compose file validates with `docker compose config`, but the containers were not built or run.
 > - **Deployed and verified live (12 October 2026):** frontend on Vercel, backend on Render, cache on MongoDB Atlas (free M0). Live checks passed for CORS from the Vercel origin, a Hyderabad 1990-2025 analysis, the CSV download, and the PDF download. `/api/health` reports `"mode": "mongodb"`, and a repeated Delhi 2000-2024 analysis went from a cache miss (3.9 s) to a MongoDB cache hit (1.1 s).
@@ -31,7 +31,7 @@ The seven numbered sections follow the order the brief asks for.
   - [API](#api) · [Caching](#caching) · [Security and performance](#security-and-performance)
 - [3. Data sources](#3-data-sources)
 - [4. Hazard logic](#4-hazard-logic)
-  - [Heatwave definition](#heatwave-definition) · [Why these defaults](#why-these-defaults) · [Percentile baseline](#percentile-baseline) · [Data quality](#data-quality) · [Annual accounting](#annual-accounting) · [Trend statistics](#trend-statistics) · [How results are worded](#how-results-are-worded)
+  - [Heatwave definition](#heatwave-definition) · [Heavy rainfall definition](#heavy-rainfall-definition) · [Drought definition](#drought-definition-dry-spells) · [Why these defaults](#why-these-defaults) · [Percentile baseline](#percentile-baseline) · [Data quality](#data-quality) · [Annual accounting](#annual-accounting) · [Trend statistics](#trend-statistics) · [How results are worded](#how-results-are-worded)
 - [5. Assumptions](#5-assumptions)
 - [6. Improvements](#6-improvements)
   - [Known limitations](#known-limitations) · [Future improvements](#future-improvements)
@@ -46,9 +46,12 @@ The seven numbered sections follow the order the brief asks for.
 - On the map, click once to choose a point, or click two corners to draw a lat-lon box.
 - Coordinates and box edges can be typed in manually, and you can set a custom label.
 
-**Hazard:** Heatwave is selected by default. Drought and heavy rainfall appear in the list but are disabled, and the API rejects them.
+**Hazards:** Heatwave (selected by default), Heavy rainfall, and Drought (dry spells). Each has its own definition, labels, charts, CSV columns and PDF text; see [4. Hazard logic](#4-hazard-logic).
 
-**Configurable heatwave definition:** the threshold percentile (90th, 92.5th, 95th, 97.5th or 99th; default 95th) and the minimum number of consecutive hot days (2 to 10; default 3). Both are shown in the results header ("95th percentile · 3+ days"), the summary card, the CSV and the PDF.
+**Configurable definitions:** the settings are shown in the results header ("95th percentile · 3+ days"), the summary card, the CSV and the PDF.
+- **Heatwave:** the threshold percentile (90th, 92.5th, 95th, 97.5th or 99th; default 95th) and the minimum number of consecutive hot days (2 to 10; default 3).
+- **Heavy rainfall:** the same percentile choices, applied to wet days, and the minimum number of consecutive heavy-rain days (1 to 10; default 1).
+- **Drought:** the minimum dry-spell length (5 to 60 days; default 15). A dry day is fixed at below 1 mm, so there is no percentile.
 
 **Baselines:** the percentile threshold comes from the fixed 1991-2020 reference period by default, or optionally from the analysis period itself.
 
@@ -56,8 +59,8 @@ The seven numbered sections follow the order the brief asks for.
 - A limitations note directly under the results header (reanalysis is not station data, percentile thresholds are relative to each location, significance is not causation)
 - Summary cards
 - A data-quality report: days received from the source, missing, implausible, duplicate, interpolated and outlier days, a check that the counts add up, a per-year breakdown, the filled days, and the most extreme flagged days (with "showing 20 of N" when the list is cut off)
-- Annual heatwave-day and event-count charts, each with a 5-year rolling mean and a linear fit
-- An annual Tmax chart with the threshold line
+- Annual hazard-day and event-count charts, each with a 5-year rolling mean and a linear fit
+- An annual Tmax chart with the threshold line (heatwave), or an annual precipitation chart: total and rain on heavy-rain days with the wettest day (heavy rainfall), or total against the baseline normal (drought)
 - Data-driven trend interpretation, with the p-value next to every headline change
 - A statistics panel with regression and Mann-Kendall results, including tooltips
 - A methodology panel, including "Why these defaults?"
@@ -147,8 +150,8 @@ All settings come from environment variables; see [.env.example](.env.example). 
 Run them yourself:
 
 ```bash
-cd backend && python -m pytest          # 148 tests
-cd frontend && npm test                 # 65 tests (Vitest + React Testing Library)
+cd backend && python -m pytest          # 170 tests
+cd frontend && npm test                 # 69 tests (Vitest + React Testing Library)
 cd frontend && npm run build            # type-check + production build
 ```
 
@@ -156,11 +159,11 @@ Results recorded on 14 October 2026 (Windows 11, Python 3.14.4, Node 25.9):
 
 | Suite | Result |
 | --- | --- |
-| Backend `pytest` | **148 passed** |
-| Frontend `vitest run` | **65 passed** (5 files) |
+| Backend `pytest` | **170 passed** |
+| Frontend `vitest run` | **69 passed** (5 files) |
 | Frontend `tsc -b && vite build` | Passed |
 | Frontend `oxlint` | No warnings |
-| Live smoke test against the real Open-Meteo API | Passed. Point analyses for Hyderabad (1990-2025) and Delhi (1995-2024) returned complete data, a valid CSV, and a valid 5-page PDF. A Telangana box (2015-2024) sampled 4 grid points with no excluded years. |
+| Live smoke test against the real Open-Meteo API | Passed. Point analyses for Hyderabad (1990-2025) and Delhi (1995-2024) returned complete data, a valid CSV, and a valid 5-page PDF. A Telangana box (2015-2024) sampled 4 grid points with no excluded years. Heavy rainfall for Mumbai (1990-2024) and drought for Jaipur (1990-2024) returned complete precipitation data, counts that add up, a valid CSV and a valid PDF. |
 | `docker compose config` | Valid |
 | `docker compose up --build` | **Not run.** The Docker engine was unavailable (see limitations). |
 
@@ -173,6 +176,12 @@ What the backend tests cover (Open-Meteo is mocked with `respx`, so no network i
   - Threshold equality
   - Percentile interpolation, repeated values, and empty or single-value datasets
   - Separation of annual event counts from annual heatwave days
+- **Heavy rainfall and drought:**
+  - The wet-day threshold uses only days of at least 1 mm, and a heavy-rain day must be strictly above it
+  - The 1 mm dry-day boundary, negative rainfall marked implausible, and a missing day never counted as dry
+  - The longest dry run (CDD) split across a year boundary, annual totals, the baseline normal, and rain on event days
+  - Both hazards through the API, a custom dry-spell length, per-hazard duration bounds, `fill_gaps` rejected for precipitation, percentile left out of the drought cache key, observations cached per variable, and a wrong precipitation unit from the provider returning `502`
+  - CSV columns and PDF text for both hazards
 - **Data quality:** the counts always add up (received = valid + null + implausible; calendar = valid + missing + implausible), with and without gap fill; days received never below valid days or negative, including a single year inside the reference period; gap fill off by default; single-day gaps filled and flagged, two-day gaps and edge gaps left missing; interpolated days excluded from the threshold and completeness; per-year interpolated, duplicate and implausible counts; outliers flagged but kept; small windows and zero-MAD windows skipped.
 - **Regression:** zero-baseline percentage handling, insufficient points, and constant series.
 - **Mann-Kendall:** increasing, decreasing, and constant series; ties; missing values; too few points; invalid values; hand-computed p-values; the effect of alpha; and the Hamed-Rao adjustment.
@@ -180,7 +189,7 @@ What the backend tests cover (Open-Meteo is mocked with `respx`, so no network i
 - **API:**
   - Health and regions endpoints, and valid point, box, and fixed-baseline analyses
   - Configurable percentile and minimum duration (thresholds, event lengths, definitions and cache keys follow the request)
-  - Validation of coordinates, reversed years, reversed reference years, over-long windows, unsupported hazards, percentiles outside the allowed set, minimum durations outside 2-10, conflicting point and box input, and over-long labels
+  - Validation of coordinates, reversed years, reversed reference years, over-long windows, unsupported hazards, percentiles outside the allowed set, minimum durations outside each hazard's range, conflicting point and box input, and over-long labels
   - Provider 500, timeout, 429, 400, and malformed responses, plus not caching failed fetches
   - Cache hits and misses (including `fill_gaps` as a separate cache key), rate limits (spoofed X-Forwarded-For ignored, CF-Connecting-IP used when the forwarded chain varies, IPv6 grouped by /64, rate-limit headers, a limit shared by two app instances through MongoDB, and fallback when the store fails), and CORS
   - CSV headers and content (hazard settings, run and per-year data-quality counts), the formula-injection guard, PDF validity, page numbers, hazard labels and data-quality section, and PDF markup escaping
@@ -200,7 +209,7 @@ What the frontend tests cover:
 - The limitations note and its link to the sources list
 - The API error banner and Retry
 - CSV and PDF downloads that use the displayed analysis, and export failures
-- Disabled unsupported hazards
+- Hazard switching: per-hazard duration defaults and bounds, the drought dry-day rule replacing the percentile, gap fill disabled for precipitation, and heavy-rainfall and drought results labelled in mm
 - City search: choosing a result by mouse or keyboard sets the coordinates, label and map; no request under 2 characters; no-match and error messages
 - Superseded-request handling in `useAnalysis`
 - Client helpers, selection validation, and chart year ticks
@@ -310,10 +319,10 @@ Query parameters, shared by the last three endpoints:
 | `south`, `west`, `north`, `east` | ... a box. Each side may be at most 10°; boxes crossing the antimeridian are not supported. |
 | `start_year`, `end_year` | From 1940 to the last complete calendar year; the window may span at most 60 years. |
 | `label` | Optional. Control characters are stripped and the result is truncated to 80 characters. |
-| `hazard` | `heatwave`. Anything else returns `422`. |
-| `percentile` | Threshold percentile: `90`, `92.5`, `95` (default), `97.5` or `99`. Anything else returns `422`. |
-| `min_duration_days` | Minimum consecutive hot days for an event, 2 to 10 (default 3). |
-| `fill_gaps` | `false` (default) or `true`. When true, isolated one-day gaps are filled and flagged; see [Data quality](#data-quality). |
+| `hazard` | `heatwave` (default), `heavy_rainfall` or `drought`. Anything else returns `422`. |
+| `percentile` | Threshold percentile: `90`, `92.5`, `95` (default), `97.5` or `99`. Anything else returns `422`. Used by heatwave and heavy rainfall; ignored for drought. |
+| `min_duration_days` | Minimum consecutive qualifying days for an event. Heatwave 2 to 10 (default 3), heavy rainfall 1 to 10 (default 1), drought 5 to 60 (default 15). Outside the range returns `422`. |
+| `fill_gaps` | `false` (default) or `true`. Heatwave only: when true, isolated one-day gaps are filled and flagged; see [Data quality](#data-quality). With a precipitation hazard, `true` returns `422`, because rainfall gaps are never interpolated. |
 | `baseline` | `fixed_reference` (default) or `analysis_period` |
 | `reference_start_year`, `reference_end_year` | Defaults 1991 and 2020. Used only with `fixed_reference`; start must not be after end, and the period must be 10 to 60 years. |
 
@@ -332,9 +341,13 @@ Example request:
 
 ```
 GET /api/analyze?latitude=17.385&longitude=78.4867&label=Hyderabad&start_year=1990&end_year=2025&percentile=90&min_duration_days=2
+GET /api/analyze?latitude=19.076&longitude=72.8777&label=Mumbai&start_year=1990&end_year=2024&hazard=heavy_rainfall
+GET /api/analyze?latitude=26.9124&longitude=75.7873&label=Jaipur&start_year=1990&end_year=2024&hazard=drought&min_duration_days=30
 ```
 
-The response contains `region`, `period`, `hazard` (`percentile`, `min_duration_days`, definition), `baseline` (including `threshold_c`), `source` (provider, dataset, timezone, retrieval time, grid points), `cache`, `summary`, `annual[]` (including per-year `missing_days`, `interpolated_days`, `duplicate_dates`, `implausible_days` and `outlier_days`), `events[]`, `trends` (`heatwave_days`, `event_count`, `mean_tmax`, each with `regression`, `mann_kendall`, and `period_change`), `data_quality`, `insights[]`, `caveats[]`, and `algorithm_version`.
+The response contains `region`, `period`, `hazard` (`type`, `name`, `variable`, `units`, `percentile`, `min_duration_days`, definition, and display `labels`), `baseline` (including `threshold_value` with `threshold_units`; `threshold_c` for heatwave; `normal_annual_total_mm` for precipitation hazards), `source` (provider, dataset, timezone, retrieval time, grid points), `cache`, `summary`, `annual[]` (including per-year `missing_days`, `interpolated_days`, `duplicate_dates`, `implausible_days` and `outlier_days`, plus `total_mm`, `max_daily_mm`, `event_total_mm` and `percent_of_normal` for precipitation hazards), `events[]`, `trends` (`heatwave_days`, `event_count`, `mean_tmax`, each with `regression`, `mann_kendall`, and `period_change`), `data_quality`, `insights[]`, `caveats[]`, and `algorithm_version`.
+
+The trend keys keep their original names for every hazard, so clients need only one schema: `heatwave_days` holds the hazard's annual days (heavy-rain days or dry-spell days), and `mean_tmax` holds the third indicator, which is annual total precipitation (mm) for the precipitation hazards. Each trend block carries its own `indicator` name and units.
 
 `data_quality` holds `analysis` and `reference` blocks (calendar, valid, missing, null, implausible, duplicate, interpolated and outlier day counts, plus completeness), `gap_fill` (`off` or `single-day linear`), `outlier_method`, `outlier_dates` (up to 20 most extreme flagged days with their value and robust z-score), `min_year_completeness` and `insufficient_years`.
 
@@ -346,7 +359,7 @@ The response contains `region`, `period`, `hazard` (`percentile`, `min_duration_
 - **`rate_limits` collection:** shared rate-limit windows (see below).
 - **Fewer provider requests:**
   - Overlapping analysis and reference ranges are fetched in one request.
-  - Changing only the label, percentile, minimum duration or gap fill reuses the cached observations.
+  - Changing only the label, percentile, minimum duration or gap fill reuses the cached observations. Heavy rainfall and drought share the cached precipitation series.
   - Exports reuse the cached analysis.
 - **Expiry:** MongoDB TTL indexes remove expired documents, and reads also re-check `expires_at`.
 - **Fallback:** if MongoDB is unreachable at startup, the app uses a process-local LRU+TTL memory cache, and `/api/health` reports which mode is active. If a MongoDB operation fails at runtime, it is treated as a cache miss.
@@ -387,11 +400,11 @@ The response contains `region`, `period`, `hazard` (`percentile`, `min_duration_
 
 | Source | Used for | Terms |
 | --- | --- | --- |
-| [Open-Meteo Historical Weather API](https://open-meteo.com/en/docs/historical-weather-api), ECMWF ERA5 reanalysis (Copernicus) | Daily maximum 2 m temperature, 1940 to the last complete year | CC BY 4.0, free for non-commercial use |
+| [Open-Meteo Historical Weather API](https://open-meteo.com/en/docs/historical-weather-api), ECMWF ERA5 reanalysis (Copernicus) | Daily maximum 2 m temperature and daily precipitation total, 1940 to the last complete year | CC BY 4.0, free for non-commercial use |
 | [Open-Meteo Geocoding API](https://open-meteo.com/en/docs/geocoding-api) (GeoNames) | City and place search | CC BY 4.0, free for non-commercial use |
 | [OpenStreetMap](https://www.openstreetmap.org/copyright) tiles, with OpenTopoMap as fallback | Basemap only; no analysis input | ODbL data, [tile usage policy](https://operations.osmfoundation.org/policies/tiles/) |
 
-**Weather request.** `daily=temperature_2m_max`, `models=era5`, `temperature_unit=celsius`, `timezone=auto`, so daily maxima use the location's local calendar day. ERA5 is pinned explicitly rather than using Open-Meteo's `best_match`, which blends ERA5-Land and other models, so the dataset is the same for every year and every query. The model is part of the cache key.
+**Weather request.** `daily=temperature_2m_max` with `temperature_unit=celsius` (heatwave) or `daily=precipitation_sum` with `precipitation_unit=mm` (heavy rainfall, drought), plus `models=era5` and `timezone=auto`, so daily values use the location's local calendar day. The returned unit is checked, and anything unexpected is rejected with a `502`. ERA5 is pinned explicitly rather than using Open-Meteo's `best_match`, which blends ERA5-Land and other models, so the dataset is the same for every year and every query. The model is part of the cache key.
 
 **What the numbers represent.** ERA5 is a reanalysis: a weather model constrained by historical observations and gridded at 0.25° (roughly 28 km). It is not weather-station data, and it smooths local extremes, so absolute temperatures can differ from a nearby station. A point query describes the grid cell it falls in, not a whole city.
 
@@ -420,12 +433,35 @@ Each item below is either **[Brief]**, a requirement taken from the case-study b
 
 A missing day breaks a run, unless the optional single-day gap fill is on (see [Data quality](#data-quality)).
 
+### Heavy rainfall definition
+
+**[Assumption]** Modelled on the ETCCDI R95p index. Variable: daily precipitation total (`precipitation_sum`, mm).
+- **Wet day:** at least 1 mm. The threshold is the P-th percentile of the **wet days** in the baseline period (same percentile method and baseline modes as heatwave). Dry days are left out because they are the majority in most climates and would pull the percentile down to a trivial amount of rain.
+- **Heavy-rain day:** precipitation **strictly greater than** the threshold.
+- **Event:** at least N consecutive heavy-rain days. P is one of 90, 92.5, 95, 97.5 or 99 (default 95); N is 1 to 10 (default 1).
+- **Per year:** heavy-rain days, events, longest run, annual total, wettest day, rain on heavy-rain event days, and the annual total as a percentage of the baseline normal.
+
+### Drought definition (dry spells)
+
+**[Assumption]** Modelled on the ETCCDI CDD (consecutive dry days) index. Variable: daily precipitation total (mm).
+- **Dry day:** **below 1 mm**. This is a fixed rule, so no percentile is used.
+- **Dry spell:** at least N consecutive dry days, with N from 5 to 60 (default 15).
+- **Per year:** dry spells, dry-spell days, the longest dry run in the year (CDD, reported whatever its length, so it is defined even in years with no qualifying spell), annual total, wettest day, and the annual total as a percentage of the baseline normal.
+- **Baseline normal:** the mean annual total over the baseline years that meet the completeness rule (1991-2020 by default).
+- **What it is not:** a dry spell is a rainfall indicator, not a declared drought. Long dry spells are normal in a dry season (for example in India outside the monsoon), so the useful signal is the change against the baseline, not the raw count. Standardised indices (SPI, SPEI) are not used.
+
+**Both precipitation hazards:** a missing day breaks a run and is **never treated as dry or as zero rain**. Gap fill is not available, and outlier screening is not applied, because rainfall is highly skewed with many zero days and genuine extremes would be flagged. Values outside 0 to 2000 mm/day are implausible and counted as missing.
+
 ### Why these defaults
 
 - **95th percentile.** Keeps hot days rare (about 18 a year in the reference climate), so events describe extremes rather than ordinary summer heat. It is also the brief's example. The 90th percentile is common in the heatwave literature, which is why it is one of the selectable options.
 - **3 consecutive days.** A common minimum duration in heatwave definitions and the brief's example. It separates sustained heat, which is what drives health and infrastructure impacts, from single hot days.
 - **1991-2020 baseline.** The current WMO 30-year climate normal. A fixed baseline gives every analysis period the same threshold, so a 1966-1970 run and a 2015-2024 run can be compared directly.
 - **What these defaults give up.** One annual threshold is simple and transparent but not seasonal, so heatwaves are mostly a pre-monsoon or summer phenomenon; a day-of-year threshold is listed under [Future improvements](#future-improvements).
+- **Heavy rainfall, 95th percentile of wet days.** The standard R95p definition used in ETCCDI climate-extremes work, so results are comparable with published studies.
+- **Heavy rainfall, 1 day.** A single very wet day already causes flooding, and multi-day heavy rain is rare at the 95th percentile; N can be raised to look for persistent events.
+- **Drought, 1 mm dry day.** The ETCCDI convention, which also avoids counting drizzle and reanalysis noise as rain.
+- **Drought, 15 days.** Long enough to describe a meaningful dry spell for crops and water supply, short enough to occur in most years; the per-year longest dry run (CDD) is reported independently of N.
 
 The same note appears in the UI under "Why these defaults?" in the methodology panel.
 
@@ -443,10 +479,10 @@ The same note appears in the UI under "Why these defaults?" in the methodology p
 
 - **Calendar alignment:** the provider series is re-indexed onto a complete calendar from 1 January of the start year to 31 December of the end year.
 - **Counts that add up.** "Days received" is the number of distinct dates the source returned inside the window (duplicate rows and dates outside the window are not counted), so it can never be negative or below the valid days. Two identities hold for every run and are checked in code: **received = valid + null + implausible**, and **calendar days = valid + missing (absent + null) + implausible**. The check is shown as a line in the data-quality panel, as an "Accounting check" row in the CSV and the PDF, and as `accounting_ok` / `accounting` in the API. Interpolated days are a subset of the missing and implausible days, not an extra category.
-- **Missing:** dates absent from the provider, nulls, NaN or non-numeric values, and implausible values (outside -60 to 60 °C) all count as missing. Each category is counted separately. A missing temperature is **never** replaced with zero.
+- **Missing:** dates absent from the provider, nulls, NaN or non-numeric values, and implausible values (outside -60 to 60 °C for temperature, 0 to 2000 mm for daily precipitation) all count as missing. Each category is counted separately. A missing temperature is **never** replaced with zero.
 - **Duplicates:** duplicate dates keep the first value and are counted, in total and per year.
-- **Gap fill (off by default):** with `fill_gaps=true` (the "Fill single-day gaps" checkbox), an isolated one-day gap between two observed days is set to the mean of its neighbours. Gaps of two or more days, and gaps at the start or end of the window, are left missing. Filled days are flagged `interpolated` and counted, in total and per year. They can complete a heatwave run, but they never enter the percentile threshold, completeness, or the annual mean and maximum. A caveat is added to the results whenever gap fill is on, and it has its own cache key. Filled days are visible wherever results appear: a "Filled" column in the year table, a note naming the heatwave events that contain a filled day (each event carries `filled_days`), the list of filled dates with their value and original flag (panel, CSV rows, PDF), and method text in the PDF that states the fill rule instead of "any missing day breaks the run".
-- **Outliers (flagged, not removed):** each observed value is compared with all observed values within ±15 calendar days of the same date across the analysis period. The robust z-score is \(z = 0.6745\,(x-\tilde{x})/\mathrm{MAD}\); days with \(|z| > 4\) are flagged and counted, and the 20 most extreme are listed with their date, value and z. When more are flagged, the panel, CSV and PDF say so ("showing 20 of 22"). Windows with fewer than 30 values or zero MAD are skipped. Outliers stay in the analysis because genuine heat extremes are also unusual; the flag is for review.
+- **Gap fill (heatwave only, off by default):** with `fill_gaps=true` (the "Fill single-day gaps" checkbox), an isolated one-day gap between two observed days is set to the mean of its neighbours. Gaps of two or more days, and gaps at the start or end of the window, are left missing. Filled days are flagged `interpolated` and counted, in total and per year. They can complete a heatwave run, but they never enter the percentile threshold, completeness, or the annual mean and maximum. A caveat is added to the results whenever gap fill is on, and it has its own cache key. Filled days are visible wherever results appear: a "Filled" column in the year table, a note naming the heatwave events that contain a filled day (each event carries `filled_days`), the list of filled dates with their value and original flag (panel, CSV rows, PDF), and method text in the PDF that states the fill rule instead of "any missing day breaks the run".
+- **Outliers (heatwave only; flagged, not removed):** each observed value is compared with all observed values within ±15 calendar days of the same date across the analysis period. The robust z-score is \(z = 0.6745\,(x-\tilde{x})/\mathrm{MAD}\); days with \(|z| > 4\) are flagged and counted, and the 20 most extreme are listed with their date, value and z. When more are flagged, the panel, CSV and PDF say so ("showing 20 of 22"). Windows with fewer than 30 values or zero MAD are skipped. Outliers stay in the analysis because genuine heat extremes are also unusual; the flag is for review.
 - **Rejected responses:** unexpected units, misaligned arrays, or invalid dates cause the whole response to be rejected with a `502`.
 - **Completeness rule:** a year is used in trend statistics only if at least 80% of its days have an observed value. Excluded years are listed in the response, the UI, and the PDF.
 
@@ -460,7 +496,7 @@ The same note appears in the UI under "Why these defaults?" in the methodology p
 
 ### Trend statistics
 
-**[Brief: regression, rolling averages, Mann-Kendall]** The indicators are annual heatwave days, annual event counts, and annual mean daily maximum temperature.
+**[Brief: regression, rolling averages, Mann-Kendall]** The indicators are annual hazard days, annual event counts, and a third indicator: annual mean daily maximum temperature for heatwave, or annual total precipitation for heavy rainfall and drought.
 
 **Rolling mean.** A trailing 5-year mean, left empty when the window contains an excluded year.
 
@@ -523,7 +559,9 @@ Everything the brief leaves open, in one place:
 | Event year | Counted once in the start year; days attributed to the year they fall in | Event counts and day totals both add up across years |
 | Trend test | Mann-Kendall with Hamed-Rao adjustment, α = 0.05, no multiple-testing correction | Robust to non-normal counts and serial correlation; the missing correction is stated |
 | Percentage change | First 5 vs last 5 qualifying years | Less sensitive to single unusual years than endpoints |
-| Hazards | Only heatwave is implemented | The brief allows one hazard; others are shown disabled |
+| Hazards | Heatwave, heavy rainfall (R95p-style) and drought as dry spells (CDD-style) | Simple, published ETCCDI-style definitions that work from one daily variable |
+| Wet and dry day | Wet day at least 1 mm; dry day below 1 mm | ETCCDI convention; ignores drizzle and reanalysis noise |
+| Precipitation data | Plausible range 0 to 2000 mm/day; no gap fill; no outlier screening; missing never counted as dry | Rainfall is skewed and intermittent, so filling or screening would invent or remove real events |
 
 ## 6. Improvements
 
@@ -546,6 +584,11 @@ The MongoDB code path is covered by `mongomock` tests and has been verified agai
 - An annual absolute threshold makes "heatwaves" mostly a pre-monsoon or summer phenomenon. A day-of-year percentile is a common alternative and is not implemented.
 - A fixed reference period that overlaps the analysis period introduces some dependence between the two.
 
+**Precipitation**
+- Reanalysis smooths local convective downpours, so heavy-rainfall amounts and counts are likely underestimated compared with rain gauges.
+- Dry spells measure rainfall only. They ignore temperature, evaporation and soil moisture, so they are not a drought declaration; SPI and SPEI are not implemented.
+- In strongly seasonal climates, most dry-spell days fall in the normal dry season.
+
 **Statistics**
 - The Hamed-Rao adjustment depends on autocorrelation estimates, which are uncertain for short records.
 - No multiple-testing correction across the three indicators (stated in the UI and insights).
@@ -562,7 +605,7 @@ The MongoDB code path is covered by `mongomock` tests and has been verified agai
 
 - Day-of-year (seasonal) percentile thresholds and an optional Tmin or heat-index co-condition.
 - Field significance or false-discovery-rate control across indicators and regions.
-- Drought (SPI/SPEI) and heavy-rainfall (R95p, Rx1day) hazards behind the existing hazard parameter.
+- Standardised drought indices (SPI, SPEI) and further rainfall indices (Rx1day, Rx5day trends) alongside the current dry-spell and R95p-style hazards.
 - Area-weighted box averages using the provider's native grid, plus administrative boundary polygons (GeoJSON).
 - Comparison against station records (for example GHCN-Daily) where a station is close to the grid cell.
 - Redis for a lower-latency shared cache and rate limiter, and background prefetching of preset regions.

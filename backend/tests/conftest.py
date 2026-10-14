@@ -26,13 +26,29 @@ def synthetic_tmax(day: date, lat: float = 17.4) -> float:
     return round(33.0 + seasonal + drift + rnd.gauss(0, 1.8), 1)
 
 
-def location_payload(lat: float, lon: float, start: date, end: date, null_dates: set[date] | None = None) -> dict:
+def synthetic_precip(day: date, lat: float = 17.4) -> float:
+    """Deterministic monsoon-like rainfall: wet June-September, mostly dry winters (stand-in for provider data)."""
+    rnd = random.Random(day.toordinal() * 17 + int(lat * 100) + 7)
+    wet_season = 6 <= day.month <= 9
+    if rnd.random() > (0.6 if wet_season else 0.08):
+        return 0.0 if rnd.random() < 0.7 else round(rnd.uniform(0.1, 0.9), 1)
+    return round(1.0 + rnd.expovariate(1 / (12.0 if wet_season else 4.0)), 1)
+
+
+SYNTHETIC = {"temperature_2m_max": (synthetic_tmax, "°C"), "precipitation_sum": (synthetic_precip, "mm")}
+
+
+def location_payload(
+    lat: float, lon: float, start: date, end: date, null_dates: set[date] | None = None,
+    variable: str = "temperature_2m_max",
+) -> dict:
     null_dates = null_dates or set()
+    fn, units = SYNTHETIC[variable]
     times, values = [], []
     d = start
     while d <= end:
         times.append(d.isoformat())
-        values.append(None if d in null_dates else synthetic_tmax(d, lat))
+        values.append(None if d in null_dates else fn(d, lat))
         d += timedelta(days=1)
     return {
         "latitude": round(lat, 2),
@@ -40,8 +56,8 @@ def location_payload(lat: float, lon: float, start: date, end: date, null_dates:
         "elevation": 505.0,
         "timezone": "Asia/Kolkata",
         "utc_offset_seconds": 19800,
-        "daily_units": {"time": "iso8601", "temperature_2m_max": "°C"},
-        "daily": {"time": times, "temperature_2m_max": values},
+        "daily_units": {"time": "iso8601", variable: units},
+        "daily": {"time": times, variable: values},
     }
 
 
@@ -51,7 +67,8 @@ def open_meteo_handler(null_dates: set[date] | None = None) -> Callable[[httpx.R
         lats = [float(v) for v in p["latitude"].split(",")]
         lons = [float(v) for v in p["longitude"].split(",")]
         start, end = date.fromisoformat(p["start_date"]), date.fromisoformat(p["end_date"])
-        locs = [location_payload(la, lo, start, end, null_dates) for la, lo in zip(lats, lons)]
+        variable = p.get("daily", "temperature_2m_max")
+        locs = [location_payload(la, lo, start, end, null_dates, variable) for la, lo in zip(lats, lons)]
         return httpx.Response(200, json=locs if len(locs) > 1 else locs[0])
 
     return handler

@@ -23,7 +23,7 @@ import math
 from collections import Counter
 from dataclasses import dataclass, field, replace
 from datetime import date, timedelta
-from typing import Iterable, Sequence
+from typing import Callable, Iterable, Sequence
 
 import numpy as np
 
@@ -130,6 +130,8 @@ class AnnualIndicator:
     duplicate_dates: int = 0
     implausible_days: int = 0
     outlier_days: int = 0
+    total_value: float | None = None
+    event_value_total: float = 0.0
 
 
 def _is_finite_number(value: object) -> bool:
@@ -279,15 +281,21 @@ def percentile_threshold(values: Iterable[float | None], percentile: float = 95.
 
 
 def detect_events(
-    records: Sequence[DailyRecord], threshold: float, min_duration: int = 3
+    records: Sequence[DailyRecord],
+    threshold: float,
+    min_duration: int = 3,
+    qualifies: Callable[[float], bool] | None = None,
 ) -> list[HeatwaveEvent]:
-    """Find runs of >= ``min_duration`` consecutive calendar days with tmax > threshold.
+    """Find runs of >= ``min_duration`` consecutive calendar days that qualify.
 
+    A day qualifies when its value is strictly greater than ``threshold``, unless another
+    ``qualifies`` test is given (for example "below 1 mm" for dry days). Missing days never qualify.
     ``records`` must be sorted and contiguous (as produced by :func:`build_daily_series`);
     a gap in dates is nevertheless treated as a break for safety.
     """
     if min_duration < 1:
         raise ValueError("min_duration must be >= 1")
+    test = qualifies or (lambda v: v > threshold)
 
     events: list[HeatwaveEvent] = []
     run: list[DailyRecord] = []
@@ -315,7 +323,7 @@ def detect_events(
         contiguous = previous_day is not None and record.day - previous_day == timedelta(days=1)
         if run and not contiguous:
             flush()
-        if record.tmax is not None and record.tmax > threshold:
+        if record.tmax is not None and test(record.tmax):
             run.append(record)
         else:
             flush()
@@ -347,6 +355,7 @@ def annual_indicators(
     hw_days: Counter[int] = Counter()
     longest: dict[int, int] = {}
     excess_sums: Counter[int] = Counter()
+    event_sums: Counter[int] = Counter()
     for ev in events:
         event_counts[ev.start_year] += 1
         for year, n_days in ev.year_contributions.items():
@@ -358,6 +367,7 @@ def annual_indicators(
         for r in records:
             if r.day in hot_days and r.tmax is not None:
                 excess_sums[r.day.year] += r.tmax - threshold
+                event_sums[r.day.year] += r.tmax
 
     result: list[AnnualIndicator] = []
     for year in range(start_year, end_year + 1):
@@ -385,6 +395,8 @@ def annual_indicators(
                 duplicate_dates=(duplicates_by_year or {}).get(year, 0),
                 implausible_days=sum(1 for r in rows if "implausible" in (r.flag, r.filled_from)),
                 outlier_days=sum(1 for r in rows if r.outlier),
+                total_value=sum(valid) if valid else None,
+                event_value_total=event_sums.get(year, 0.0),
             )
         )
     return result

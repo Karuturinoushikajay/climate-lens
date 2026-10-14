@@ -33,8 +33,11 @@ export function MethodologyPanel({ data }: { data: AnalysisResponse }) {
           <p>{data.hazard.definition}</p>
           <dl>
             <div className="stat-row"><dt>Baseline</dt><dd>{b.mode === 'analysis_period' ? 'Analysis period' : 'Fixed reference'} ({b.reference_start_year}–{b.reference_end_year})</dd></div>
-            <div className="stat-row"><dt>Threshold</dt><dd>{fmt(b.threshold_c, 2, ' °C')}</dd></div>
-            <div className="stat-row"><dt>Percentile method</dt><dd>{b.percentile_method}</dd></div>
+            <div className="stat-row"><dt>Threshold</dt><dd>{fmt(b.threshold_value ?? b.threshold_c, 2, ` ${b.threshold_units ?? '°C'}`)}</dd></div>
+            {b.normal_annual_total_mm != null && (
+              <div className="stat-row"><dt>Normal annual precipitation</dt><dd>{fmt(b.normal_annual_total_mm, 0, ' mm')}</dd></div>
+            )}
+            <div className="stat-row"><dt>Threshold method</dt><dd>{b.percentile_method}</dd></div>
             <div className="stat-row"><dt>Days used for threshold</dt><dd>{b.valid_days_used}</dd></div>
           </dl>
           <p className="fine">{b.note}</p>
@@ -49,6 +52,36 @@ export function MethodologyPanel({ data }: { data: AnalysisResponse }) {
           </p>
           <details className="defaults-note fine" data-testid="defaults-note">
             <summary>Why these defaults?</summary>
+            {data.hazard.type === 'heavy_rainfall' ? (
+              <ul>
+                <li>
+                  <strong>95th percentile of wet days:</strong> the ETCCDI R95p convention. Only days with at least 1 mm
+                  count, so the threshold is not dragged down by the many dry days.
+                </li>
+                <li>
+                  <strong>1 day:</strong> a single extreme day is enough to cause flooding, so every heavy-rain day counts;
+                  raise it to look for multi-day wet spells.
+                </li>
+                <li>
+                  <strong>1991–2020 baseline:</strong> the current WMO climate normal, shared by every analysis period.
+                </li>
+              </ul>
+            ) : data.hazard.type === 'drought' ? (
+              <ul>
+                <li>
+                  <strong>Dry day below 1 mm:</strong> the ETCCDI convention used for consecutive dry days (CDD); trace
+                  amounts do not end a dry spell.
+                </li>
+                <li>
+                  <strong>15 days:</strong> long enough to stress rain-fed crops in the growing season, short enough to
+                  register within a year. 5 to 60 days can be selected.
+                </li>
+                <li>
+                  <strong>Annual % of normal:</strong> dry spells alone ignore how much rain falls when it does rain, so
+                  the yearly total is compared with the 1991–2020 normal.
+                </li>
+              </ul>
+            ) : (
             <ul>
               <li>
                 <strong>95th percentile:</strong> keeps hot days rare (about 18 a year in the reference climate), so events
@@ -68,6 +101,7 @@ export function MethodologyPanel({ data }: { data: AnalysisResponse }) {
                 is listed as a future improvement.
               </li>
             </ul>
+            )}
           </details>
         </div>
         <Quality title="Analysis period data" q={q.analysis} />

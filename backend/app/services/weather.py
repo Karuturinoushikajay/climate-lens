@@ -1,4 +1,4 @@
-"""Open-Meteo Historical Weather API client for daily maximum temperature."""
+"""Open-Meteo Historical Weather API client for daily maximum temperature and precipitation."""
 
 from __future__ import annotations
 
@@ -16,7 +16,12 @@ from ..errors import WeatherProviderError
 logger = logging.getLogger(__name__)
 
 VARIABLE = "temperature_2m_max"
+PRECIP_VARIABLE = "precipitation_sum"
 EXPECTED_UNITS = {"°C", "C", "degC"}
+VARIABLE_UNITS: dict[str, tuple[str, set[str], dict[str, str]]] = {
+    VARIABLE: ("°C", EXPECTED_UNITS, {"temperature_unit": "celsius"}),
+    PRECIP_VARIABLE: ("mm", {"mm"}, {"precipitation_unit": "mm"}),
+}
 PROVIDER = "Open-Meteo Historical Weather API"
 # Pinned so the series is one consistent dataset from 1940 onward; Open-Meteo's default
 # "best_match" blends ERA5-Land (0.1°, from 1950) and other models.
@@ -35,7 +40,7 @@ class GridPoint:
 @dataclass
 class WeatherSeries:
     dates: list[str]
-    tmax: list[float | None]
+    tmax: list[float | None]  # daily values of the requested variable; the name predates precipitation support
     start: date
     end: date
     units: str
@@ -103,7 +108,12 @@ class OpenMeteoClient:
         self._client.close()
 
     def fetch_daily_tmax(self, points: Sequence[tuple[float, float]], start: date, end: date) -> WeatherSeries:
-        """Fetch daily Tmax for one or more points; multiple points are averaged per day.
+        return self.fetch_daily(points, start, end, VARIABLE)
+
+    def fetch_daily(
+        self, points: Sequence[tuple[float, float]], start: date, end: date, variable: str = VARIABLE
+    ) -> WeatherSeries:
+        """Fetch one daily variable for one or more points; multiple points are averaged per day.
 
         A multi-point daily mean is only produced when every point has a valid value for that
         day; otherwise the day is left missing.
@@ -112,14 +122,17 @@ class OpenMeteoClient:
             raise ValueError("at least one point is required")
         if end < start:
             raise ValueError("end must not be before start")
+        if variable not in VARIABLE_UNITS:
+            raise ValueError(f"unsupported variable {variable}")
+        units, _, unit_params = VARIABLE_UNITS[variable]
 
         params = {
             "latitude": ",".join(f"{p[0]:.4f}" for p in points),
             "longitude": ",".join(f"{p[1]:.4f}" for p in points),
             "start_date": start.isoformat(),
             "end_date": end.isoformat(),
-            "daily": VARIABLE,
-            "temperature_unit": "celsius",
+            "daily": variable,
+            **unit_params,
             "timezone": "auto",
             "models": MODEL,
         }
@@ -128,7 +141,7 @@ class OpenMeteoClient:
         if len(locations) != len(points):
             raise WeatherProviderError(502, "upstream_malformed", "Weather provider returned an unexpected number of locations.")
 
-        parsed = [self._parse_location(loc) for loc in locations]
+        parsed = [self._parse_location(loc, variable) for loc in locations]
         dates = parsed[0]["dates"]
         for other in parsed[1:]:
             if other["dates"] != dates:
@@ -149,7 +162,7 @@ class OpenMeteoClient:
             tmax=tmax,
             start=start,
             end=end,
-            units="°C",
+            units=units,
             timezone=parsed[0]["timezone"],
             retrieved_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
             endpoint=self.base_url,
@@ -207,7 +220,7 @@ class OpenMeteoClient:
         raise WeatherProviderError(503, "upstream_unavailable", "The weather data provider is currently unavailable.")
 
     @staticmethod
-    def _parse_location(loc: Any) -> dict[str, Any]:
+    def _parse_location(loc: Any, variable: str = VARIABLE) -> dict[str, Any]:
         if not isinstance(loc, dict):
             raise WeatherProviderError(502, "upstream_malformed", "Weather provider response is not an object.")
         if loc.get("error"):
@@ -215,12 +228,13 @@ class OpenMeteoClient:
         daily = loc.get("daily")
         if not isinstance(daily, dict):
             raise WeatherProviderError(502, "upstream_malformed", "Weather provider response has no daily data.")
-        times, values = daily.get("time"), daily.get(VARIABLE)
+        times, values = daily.get("time"), daily.get(variable)
         if not isinstance(times, list) or not isinstance(values, list) or len(times) != len(values):
             raise WeatherProviderError(502, "upstream_malformed", "Weather provider daily arrays are missing or misaligned.")
-        units = (loc.get("daily_units") or {}).get(VARIABLE)
-        if units is not None and units not in EXPECTED_UNITS:
-            raise WeatherProviderError(502, "upstream_malformed", f"Unexpected temperature unit '{units}' from provider.")
+        units = (loc.get("daily_units") or {}).get(variable)
+        if units is not None and units not in VARIABLE_UNITS[variable][1]:
+            kind = "temperature" if variable == VARIABLE else "precipitation"
+            raise WeatherProviderError(502, "upstream_malformed", f"Unexpected {kind} unit '{units}' from provider.")
 
         dates: list[str] = []
         for t in times:

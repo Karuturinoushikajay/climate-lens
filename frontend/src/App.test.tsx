@@ -1,7 +1,7 @@
 import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { HEALTH, PRESETS, makeAnalysis } from './test/fixtures'
+import { HEALTH, PRESETS, makeAnalysis, makePrecipAnalysis } from './test/fixtures'
 
 vi.mock('react-leaflet', async () => (await import('./test/leafletMock')).leafletMock)
 
@@ -16,13 +16,16 @@ const json = (body: unknown, status = 200, headers: Record<string, string> = {})
 function defaultAnalyze(url: URL): Promise<Response> {
   const p = url.searchParams
   const label = p.get('label') ?? `Point ${p.get('latitude')}, ${p.get('longitude')}`
-  const body = makeAnalysis(
+  const args = [
     label,
     Number(p.get('latitude') ?? 0),
     Number(p.get('longitude') ?? 0),
     Number(p.get('start_year')),
     Number(p.get('end_year')),
-  )
+  ] as const
+  const hazard = p.get('hazard')
+  const body =
+    hazard === 'heavy_rainfall' || hazard === 'drought' ? makePrecipAnalysis(hazard, ...args) : makeAnalysis(...args)
   if (p.has('percentile')) body.hazard.percentile = Number(p.get('percentile'))
   if (p.has('min_duration_days')) body.hazard.min_duration_days = Number(p.get('min_duration_days'))
   if (p.get('fill_gaps') === 'true') {
@@ -117,8 +120,9 @@ describe('App', () => {
   it('runs the default analysis and renders API values', async () => {
     await renderLoaded()
     expect(screen.getByTestId('result-title')).toHaveTextContent('Hyderabad')
-    expect(screen.getByTestId('metric-Heatwave events')).toHaveTextContent('7')
-    expect(screen.getByTestId('metric-Heatwave days')).toHaveTextContent('31')
+    expect(screen.getByTestId('metric-events')).toHaveTextContent('7')
+    expect(screen.getByTestId('metric-days')).toHaveTextContent('31')
+    expect(screen.getByText('Heatwave events')).toBeInTheDocument()
     expect(screen.getByTestId('metric-threshold')).toHaveTextContent('39.9 °C')
     expect(screen.getByText('95th pct threshold')).toBeInTheDocument()
     expect(screen.getByText(/7 heatwave event\(s\) totalling 31 heatwave day\(s\)/)).toBeInTheDocument()
@@ -498,10 +502,64 @@ describe('App', () => {
     expect(screen.getByRole('button', { name: /run analysis/i })).toBeDisabled()
   })
 
-  it('unsupported hazards are visible but disabled', async () => {
+  it('offers heatwave, heavy rainfall and drought', async () => {
     await renderLoaded()
-    expect(screen.getByRole('option', { name: /drought/i })).toBeDisabled()
     expect(screen.getByLabelText('Hazard type')).toHaveValue('heatwave')
+    for (const name of [/heatwave/i, /heavy rainfall/i, /drought/i])
+      expect(screen.getByRole('option', { name })).toBeEnabled()
+  })
+
+  it('runs a heavy-rainfall analysis with precipitation labels and no gap fill', async () => {
+    const user = await renderLoaded()
+    await user.click(screen.getByRole('checkbox', { name: /fill single-day gaps/i }))
+    await user.selectOptions(screen.getByLabelText('Hazard type'), 'heavy_rainfall')
+    const days = screen.getByLabelText('Minimum consecutive days')
+    expect(days).toHaveValue(1)
+    const box = screen.getByRole('checkbox', { name: /fill single-day gaps/i })
+    expect(box).toBeDisabled()
+    expect(box).not.toBeChecked()
+    await user.click(screen.getByRole('button', { name: /run analysis/i }))
+    await waitFor(() => expect(lastAnalyze().get('hazard')).toBe('heavy_rainfall'))
+    expect(lastAnalyze().get('min_duration_days')).toBe('1')
+    expect(lastAnalyze().get('percentile')).toBe('95')
+    expect(lastAnalyze().has('fill_gaps')).toBe(false)
+    await waitFor(() => expect(screen.getByTestId('result-hazard')).toHaveTextContent('Heavy rainfall: 95th percentile · 1+ days'))
+    expect(screen.getByText('Heavy-rain events')).toBeInTheDocument()
+    expect(screen.getByTestId('metric-threshold')).toHaveTextContent('48.6 mm')
+    expect(screen.getByText('95th pct wet-day threshold')).toBeInTheDocument()
+    expect(screen.getByTestId('metric-value')).toHaveTextContent('790 mm')
+    expect(screen.getByRole('tab', { name: 'Heavy-rain days' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'Annual total' })).toBeInTheDocument()
+    const table = screen.getByRole('region', { name: 'Annual indicators table' })
+    expect(within(table).getByRole('columnheader', { name: 'On heavy days mm' })).toBeInTheDocument()
+    expect(within(table).queryByRole('columnheader', { name: /Tmax/ })).not.toBeInTheDocument()
+    expect(screen.getByText('Annual precipitation')).toBeInTheDocument()
+    expect(screen.getByTestId('limitations')).toHaveTextContent('different rainfall amounts')
+  })
+
+  it('runs a drought analysis with dry-spell settings and percent of normal', async () => {
+    const user = await renderLoaded()
+    await user.selectOptions(screen.getByLabelText('Hazard type'), 'drought')
+    expect(screen.queryByLabelText('Threshold percentile')).not.toBeInTheDocument()
+    expect(screen.getByTestId('dry-day-rule')).toHaveTextContent('below 1 mm')
+    const days = screen.getByLabelText('Minimum consecutive days')
+    expect(days).toHaveValue(15)
+    await user.clear(days)
+    await user.type(days, '61')
+    expect(screen.getByText('Minimum consecutive days must be a whole number from 5 to 60.')).toBeInTheDocument()
+    await user.clear(days)
+    await user.type(days, '20')
+    await user.click(screen.getByRole('button', { name: /run analysis/i }))
+    await waitFor(() => expect(lastAnalyze().get('hazard')).toBe('drought'))
+    expect(lastAnalyze().get('min_duration_days')).toBe('20')
+    expect(lastAnalyze().has('percentile')).toBe(false)
+    await waitFor(() => expect(screen.getByTestId('result-hazard')).toHaveTextContent('Drought (dry spells): dry days below 1 mm'))
+    expect(screen.getByTestId('metric-threshold')).toHaveTextContent('< 1 mm')
+    const table = screen.getByRole('region', { name: 'Annual indicators table' })
+    expect(within(table).getByRole('columnheader', { name: '% of normal' })).toBeInTheDocument()
+    expect(within(table).getByText('86%')).toBeInTheDocument()
+    expect(screen.getByTestId('limitations')).toHaveTextContent('not a declared drought')
+    expect(screen.getByTestId('defaults-note')).toHaveTextContent('Dry day below 1 mm')
   })
 
   describe('city search', () => {

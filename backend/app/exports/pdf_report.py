@@ -154,6 +154,14 @@ def _trend_rows(t: IndicatorTrendOut) -> tuple[list[list[object]], list[list[obj
 def build_pdf(r: AnalysisResponse) -> bytes:
     s = _styles()
     buf = io.BytesIO()
+    h = r.hazard
+    heat = h.type == "heatwave"
+    labels = h.labels or {}
+    name = h.name or "Heatwave"
+    days_label = labels.get("days", "Heatwave days")
+    events_label = labels.get("events", "Heatwave events")
+    qualifying_day = labels.get("qualifying_day", "hot day")
+    unit = h.units
     doc = SimpleDocTemplate(
         buf,
         pagesize=A4,
@@ -161,16 +169,16 @@ def build_pdf(r: AnalysisResponse) -> bytes:
         rightMargin=18 * mm,
         topMargin=16 * mm,
         bottomMargin=18 * mm,
-        title=f"Climate Lens heatwave report - {r.region.label}",
+        title=f"Climate Lens {name.lower()} report - {r.region.label}",
         author="Climate Lens",
-        subject="Heatwave trend analysis",
+        subject=f"{name} trend analysis",
     )
     P = lambda text, style="body": Paragraph(escape(str(text)), s[style])  # noqa: E731
     wrap = lambda text: Paragraph(escape(str(text)), s["cell"])  # noqa: E731
     story: list = []
 
     generated = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    story.append(Paragraph("Heatwave Trend Report", s["title"]))
+    story.append(Paragraph(f"{name} Trend Report", s["title"]))
     story.append(P(f"Climate Lens - Climate Hazard Trend Analyzer. Report generated {generated}.", "small"))
     story.append(Spacer(1, 6))
 
@@ -199,44 +207,58 @@ def build_pdf(r: AnalysisResponse) -> bytes:
     story.append(Spacer(1, 4))
     story.append(P(region.note, "small"))
 
-    story.append(Paragraph("Heatwave definition and baseline", s["h2"]))
-    story.append(P(r.hazard.definition))
-    story.append(
-        _table(
-            [
-                ["Baseline mode", r.baseline.mode.replace("_", " ")],
-                ["Baseline period", f"{r.baseline.reference_start_year}-{r.baseline.reference_end_year}"],
-                ["Threshold percentile", f"{r.hazard.percentile:g}th"],
-                ["Minimum consecutive hot days", r.hazard.min_duration_days],
-                [f"{r.hazard.percentile:g}th-percentile threshold", _fmt(r.baseline.threshold_c, 2, " °C")],
-                ["Percentile method", r.baseline.percentile_method],
-                ["Valid days used for threshold", r.baseline.valid_days_used],
-            ],
-            [45 * mm, 129 * mm],
-            header=False,
-        )
-    )
+    story.append(Paragraph(f"{name} definition and baseline", s["h2"]))
+    story.append(P(h.definition))
+    def_rows: list[list[object]] = [
+        ["Baseline mode", r.baseline.mode.replace("_", " ")],
+        ["Baseline period", f"{r.baseline.reference_start_year}-{r.baseline.reference_end_year}"],
+    ]
+    if h.percentile is not None:
+        threshold = r.baseline.threshold_c if heat else r.baseline.threshold_value
+        def_rows += [
+            ["Threshold percentile", f"{h.percentile:g}th"],
+            [f"Minimum consecutive {qualifying_day}s", h.min_duration_days],
+            [f"{h.percentile:g}th-percentile threshold", _fmt(threshold, 2, f" {unit}")],
+        ]
+    else:
+        def_rows += [
+            [f"Minimum consecutive {qualifying_day}s", h.min_duration_days],
+            ["Dry-day threshold", f"below {_fmt(r.baseline.threshold_value, 1, ' mm')}"],
+        ]
+    if not heat:
+        def_rows.append(["Baseline normal annual precipitation", _fmt(r.baseline.normal_annual_total_mm, 0, " mm")])
+    def_rows += [
+        ["Percentile method", wrap(r.baseline.percentile_method)],
+        ["Valid days used for threshold", r.baseline.valid_days_used],
+    ]
+    story.append(_table(def_rows, [45 * mm, 129 * mm], header=False))
     story.append(Spacer(1, 3))
     story.append(P(r.baseline.note, "small"))
 
     sm = r.summary
     story.append(Paragraph("Summary metrics", s["h2"]))
-    story.append(
-        _table(
-            [
-                ["Total heatwave events", sm.total_events],
-                ["Total heatwave days", sm.total_heatwave_days],
-                ["Mean events per year", _fmt(sm.mean_events_per_year, 2)],
-                ["Mean heatwave days per year", _fmt(sm.mean_heatwave_days_per_year, 2)],
-                ["Longest event", f"{sm.longest_event_days} days" + (f" ({sm.longest_event_start} to {sm.longest_event_end})" if sm.longest_event_start else "")],
-                ["Peak daily maximum", _fmt(sm.peak_tmax_c, 2, " °C")],
-                ["Mean daily maximum", _fmt(sm.mean_tmax_c, 2, " °C")],
-                ["Years analysed / used for trends", f"{sm.years_analyzed} / {sm.years_used_for_trends}"],
-            ],
-            [60 * mm, 114 * mm],
-            header=False,
-        )
+    longest = f"{sm.longest_event_days} days" + (
+        f" ({sm.longest_event_start} to {sm.longest_event_end})" if sm.longest_event_start else ""
     )
+    summary_rows: list[list[object]] = [
+        [f"Total {events_label.lower()}", sm.total_events],
+        [f"Total {days_label.lower()}", sm.total_heatwave_days],
+        ["Mean events per year", _fmt(sm.mean_events_per_year, 2)],
+        [f"Mean {days_label.lower()} per year", _fmt(sm.mean_heatwave_days_per_year, 2)],
+        ["Longest event", longest],
+    ]
+    if heat:
+        summary_rows += [
+            ["Peak daily maximum", _fmt(sm.peak_tmax_c, 2, " °C")],
+            ["Mean daily maximum", _fmt(sm.mean_tmax_c, 2, " °C")],
+        ]
+    else:
+        summary_rows += [
+            ["Wettest day in the period", _fmt(sm.peak_daily_mm, 1, " mm")],
+            ["Mean annual precipitation", _fmt(sm.mean_annual_total_mm, 0, " mm")],
+        ]
+    summary_rows.append(["Years analysed / used for trends", f"{sm.years_analyzed} / {sm.years_used_for_trends}"])
+    story.append(_table(summary_rows, [60 * mm, 114 * mm], header=False))
 
     story.append(Paragraph("Key insights", s["h2"]))
     for line in r.insights:
@@ -244,19 +266,33 @@ def build_pdf(r: AnalysisResponse) -> bytes:
 
     years = [a.year for a in r.annual]
     story.append(Spacer(1, 6))
-    story.append(KeepTogether([_bar_chart("Annual heatwave days", years, [a.heatwave_days for a in r.annual], AMBER)]))
-    story.append(KeepTogether([_bar_chart("Annual heatwave events (counted in start year)", years, [a.event_count for a in r.annual], MINT)]))
+    story.append(KeepTogether([_bar_chart(f"Annual {days_label.lower()}", years, [a.heatwave_days for a in r.annual], AMBER)]))
+    story.append(KeepTogether([_bar_chart(f"Annual {events_label.lower()} (counted in start year)", years, [a.event_count for a in r.annual], MINT)]))
+    if not heat:
+        story.append(KeepTogether([_bar_chart("Annual precipitation (mm)", years, [a.total_mm or 0 for a in r.annual], FOREST)]))
 
-    story.append(Paragraph("Annual heatwave days", s["h2"]))
-    rows: list[list[object]] = [["Year", "Heatwave days", "Longest event (days)", "Mean excess (°C)", "Mean Tmax (°C)", "Completeness", "Used in trends"]]
-    for a in r.annual:
-        rows.append([a.year, a.heatwave_days, a.longest_event_days, _fmt(a.mean_excess_c), _fmt(a.mean_tmax_c), f"{a.completeness * 100:.1f}%", _fmt(a.sufficient_data)])
+    story.append(Paragraph(f"Annual {days_label.lower()}", s["h2"]))
+    rows: list[list[object]]
+    if heat:
+        rows = [["Year", "Heatwave days", "Longest event (days)", "Mean excess (°C)", "Mean Tmax (°C)", "Completeness", "Used in trends"]]
+        for a in r.annual:
+            rows.append([a.year, a.heatwave_days, a.longest_event_days, _fmt(a.mean_excess_c), _fmt(a.mean_tmax_c), f"{a.completeness * 100:.1f}%", _fmt(a.sufficient_data)])
+    else:
+        longest_col = "Longest dry spell (days)" if h.type == "drought" else "Longest run (days)"
+        rows = [["Year", days_label, longest_col, "Total (mm)", "% of normal", "Wettest day (mm)", "Completeness", "Used in trends"]]
+        for a in r.annual:
+            rows.append([
+                a.year, a.heatwave_days, a.longest_event_days, _fmt(a.total_mm, 0), _fmt(a.percent_of_normal, 0, "%"),
+                _fmt(a.max_daily_mm, 1), f"{a.completeness * 100:.1f}%", _fmt(a.sufficient_data),
+            ])
     story.append(_table(rows))
 
     story.append(Paragraph("Annual event frequency", s["h2"]))
-    rows = [["Year", "Events", "5-yr rolling mean (events)", "Heatwave days", "5-yr rolling mean (days)", "Max Tmax (°C)"]]
+    last_col = "Max Tmax (°C)" if heat else ("Rain on event days (mm)" if h.type == "heavy_rainfall" else "Total (mm)")
+    rows = [["Year", "Events", "5-yr rolling mean (events)", days_label, "5-yr rolling mean (days)", last_col]]
     for a in r.annual:
-        rows.append([a.year, a.event_count, _fmt(a.event_count_rolling_mean), a.heatwave_days, _fmt(a.heatwave_days_rolling_mean), _fmt(a.max_tmax_c)])
+        last = _fmt(a.max_tmax_c) if heat else _fmt(a.event_total_mm if h.type == "heavy_rainfall" else a.total_mm, 0)
+        rows.append([a.year, a.event_count, _fmt(a.event_count_rolling_mean), a.heatwave_days, _fmt(a.heatwave_days_rolling_mean), last])
     story.append(_table(rows))
 
     story.append(Paragraph("Linear regression (descriptive)", s["h2"]))
@@ -285,7 +321,7 @@ def build_pdf(r: AnalysisResponse) -> bytes:
         ["Missing days (absent + null)", qa.missing_dates + qa.null_values],
         ["Dates absent from provider", qa.missing_dates],
         ["Null values from provider", qa.null_values],
-        [f"Implausible values (outside {q.plausible_range_c[0]:g} to {q.plausible_range_c[1]:g} °C)", qa.implausible_values],
+        [f"Implausible values (outside {q.plausible_range_c[0]:g} to {q.plausible_range_c[1]:g} {q.plausible_range_units})", qa.implausible_values],
         ["Duplicate dates", qa.duplicate_dates],
         ["Interpolated days (gap fill)", qa.interpolated_days],
         ["Statistical outlier days (flagged, kept)", qa.outlier_days],
@@ -326,15 +362,28 @@ def build_pdf(r: AnalysisResponse) -> bytes:
         if q.gap_fill != "off"
         else "Nothing is interpolated or zero-filled."
     )
+    variable_text = "Daily maximum 2 m air temperature" if heat else "Daily precipitation total (mm)"
+    if heat:
+        rule = (
+            f"A hot day is a valid day whose maximum temperature is strictly greater than the threshold. A heatwave is a run of at least {h.min_duration_days} consecutive hot days; "
+            + (
+                "an isolated single-day gap between two observed days is filled and flagged, and any longer gap breaks the run."
+                if q.gap_fill != "off"
+                else "any missing day breaks the run."
+            )
+        )
+        attribution = "Heatwave days are attributed to the calendar year in which each day falls, and a year's longest event is the longest single-event contribution to that year."
+    else:
+        rule = h.definition + " A missing day is never treated as dry or wet; it breaks the run."
+        attribution = (
+            "Dry-spell days are attributed to the calendar year in which each day falls; a year's longest dry spell is the longest run of dry days falling in that year, whatever its length."
+            if h.type == "drought"
+            else "Heavy-rain days are attributed to the calendar year in which each day falls."
+        )
     method = [
-        "Daily maximum 2 m air temperature is retrieved from the Open-Meteo Historical Weather API and aligned to a complete calendar. Missing dates, null values and implausible values are kept as missing. " + filled,
-        f"A hot day is a valid day whose maximum temperature is strictly greater than the threshold. A heatwave is a run of at least {r.hazard.min_duration_days} consecutive hot days; "
-        + (
-            "an isolated single-day gap between two observed days is filled and flagged, and any longer gap breaks the run."
-            if q.gap_fill != "off"
-            else "any missing day breaks the run."
-        ),
-        "Events are counted once, in the year they start. Heatwave days are attributed to the calendar year in which each day falls, and a year's longest event is the longest single-event contribution to that year.",
+        f"{variable_text} is retrieved from the Open-Meteo Historical Weather API and aligned to a complete calendar. Missing dates, null values and implausible values are kept as missing. " + filled,
+        rule,
+        "Events are counted once, in the year they start. " + attribution,
         "Percentage changes compare the mean of the first and last five qualifying years and are omitted when the early-period mean is zero.",
     ]
     for line in method + r.caveats:

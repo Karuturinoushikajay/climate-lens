@@ -164,6 +164,79 @@ export function makeAnalysis(label = 'Hyderabad', lat = 17.385, lon = 78.4867, s
   }
 }
 
+export function makePrecipAnalysis(
+  hazard: 'heavy_rainfall' | 'drought',
+  ...args: Parameters<typeof makeAnalysis>
+): AnalysisResponse {
+  const body = makeAnalysis(...args)
+  const heavy = hazard === 'heavy_rainfall'
+  body.hazard = {
+    type: hazard,
+    name: heavy ? 'Heavy rainfall' : 'Drought (dry spells)',
+    definition: heavy
+      ? 'Heavy-rain day: daily precipitation strictly greater than the 95th percentile of wet-day (>= 1 mm) precipitation in the baseline.'
+      : 'Dry spell: at least 15 consecutive valid days with precipitation strictly less than 1 mm.',
+    percentile: heavy ? 95 : null,
+    min_duration_days: heavy ? 1 : 15,
+    comparison: heavy ? 'strictly greater than' : 'strictly less than',
+    variable: 'precipitation_sum',
+    units: 'mm',
+    labels: heavy
+      ? {
+          days: 'Heavy-rain days',
+          events: 'Heavy-rain events',
+          longest: 'Longest heavy-rain run',
+          threshold: 'pct wet-day threshold',
+          qualifying_day: 'heavy-rain day',
+          third: 'Annual total',
+          third_long: 'Annual total precipitation',
+        }
+      : {
+          days: 'Dry-spell days',
+          events: 'Dry spells',
+          longest: 'Longest dry spell (CDD)',
+          threshold: 'Dry-day threshold',
+          qualifying_day: 'dry day',
+          third: 'Annual total',
+          third_long: 'Annual total precipitation',
+        },
+  }
+  body.baseline = {
+    ...body.baseline,
+    threshold_c: null,
+    threshold_value: heavy ? 48.6 : 1,
+    threshold_units: 'mm',
+    normal_annual_total_mm: 812,
+  }
+  body.source = { ...body.source, variable: 'precipitation_sum', units: 'mm' }
+  body.summary = { ...body.summary, peak_tmax_c: null, mean_tmax_c: null, peak_daily_mm: 131.2, mean_annual_total_mm: 790 }
+  body.annual = body.annual.map((a, i) => ({
+    ...a,
+    mean_tmax_c: null,
+    max_tmax_c: null,
+    mean_excess_c: null,
+    total_mm: [700, 820, 850][i] ?? 800,
+    max_daily_mm: [90.5, 101, 131.2][i] ?? 90,
+    event_total_mm: heavy ? ([120, 180, 260][i] ?? 100) : null,
+    percent_of_normal: [86.2, 101, 104.7][i] ?? 98.5,
+    outlier_days: 0,
+  }))
+  body.trends.mean_tmax = { ...body.trends.mean_tmax, indicator: 'Annual total precipitation', units: 'mm/year' }
+  body.data_quality = {
+    ...body.data_quality,
+    plausible_range_c: [0, 2000],
+    plausible_range_units: 'mm',
+    outlier_method: 'not applied to precipitation (a skewed distribution with many zero days)',
+    outlier_dates: [],
+    outlier_total: 0,
+    analysis: { ...body.data_quality.analysis, outlier_days: 0 },
+  }
+  body.insights = [
+    `${args[0] ?? 'Hyderabad'}: 7 ${heavy ? 'heavy-rain event(s)' : 'dry spell(s)'} totalling 31 ${heavy ? 'heavy-rain day(s)' : 'dry-spell day(s)'} were detected.`,
+  ]
+  return body
+}
+
 export const PRESETS: PresetRegion[] = [
   { id: 'hyderabad', name: 'Hyderabad', kind: 'city', latitude: 17.385, longitude: 78.4867, bbox: null },
   { id: 'delhi', name: 'Delhi', kind: 'city', latitude: 28.6139, longitude: 77.209, bbox: null },

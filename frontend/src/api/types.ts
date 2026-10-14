@@ -114,6 +114,10 @@ export interface AnnualRow {
   mean_tmax_c: number | null
   max_tmax_c: number | null
   mean_excess_c: number | null
+  total_mm?: number | null
+  max_daily_mm?: number | null
+  event_total_mm?: number | null
+  percent_of_normal?: number | null
   valid_days: number
   expected_days: number
   missing_days: number
@@ -132,9 +136,11 @@ export interface HeatwaveEvent {
   start: string
   end: string
   duration_days: number
-  peak_tmax_c: number
-  mean_tmax_c: number
-  mean_excess_c: number
+  peak_tmax_c: number | null
+  mean_tmax_c: number | null
+  mean_excess_c: number | null
+  peak_value?: number | null
+  total_value?: number | null
   start_year: number
   year_contributions: { year: number; days: number }[]
   filled_days?: number
@@ -169,6 +175,16 @@ export interface FilledDay {
   reason: string
 }
 
+export interface HazardLabels {
+  days: string
+  events: string
+  longest: string
+  threshold: string
+  qualifying_day: string
+  third: string
+  third_long: string
+}
+
 export interface AnalysisResponse {
   request: Record<string, unknown>
   region: {
@@ -181,12 +197,25 @@ export interface AnalysisResponse {
     note: string
   }
   period: { start_year: number; end_year: number; start_date: string; end_date: string; years: number }
-  hazard: { type: string; definition: string; percentile: number; min_duration_days: number; comparison: string }
+  hazard: {
+    type: string
+    name?: string
+    definition: string
+    percentile: number | null
+    min_duration_days: number
+    comparison: string
+    variable?: string
+    units?: string
+    labels?: HazardLabels
+  }
   baseline: {
     mode: 'analysis_period' | 'fixed_reference'
     reference_start_year: number
     reference_end_year: number
     threshold_c: number | null
+    threshold_value?: number | null
+    threshold_units?: string
+    normal_annual_total_mm?: number | null
     percentile_method: string
     valid_days_used: number
     note: string
@@ -214,6 +243,8 @@ export interface AnalysisResponse {
     longest_event_end: string | null
     peak_tmax_c: number | null
     mean_tmax_c: number | null
+    peak_daily_mm?: number | null
+    mean_annual_total_mm?: number | null
     years_analyzed: number
     years_used_for_trends: number
     excluded_years: number[]
@@ -227,6 +258,7 @@ export interface AnalysisResponse {
     min_year_completeness: number
     insufficient_years: number[]
     plausible_range_c: number[]
+    plausible_range_units?: string
     gap_fill?: string
     outlier_method?: string
     outlier_dates?: OutlierDay[]

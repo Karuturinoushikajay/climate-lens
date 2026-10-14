@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { AnalysisResponse, IndicatorTrend } from '../api/types'
 import { fmt, fmtP, fmtSigned } from '../utils/format'
+import { hazardView } from '../utils/hazard'
 import { InfoTip } from './InfoTip'
 
 const TIPS = {
@@ -17,11 +18,7 @@ const TIPS = {
   sen: "Sen's slope: median of all pairwise slopes, a robust companion to Mann-Kendall.",
 }
 
-const INDICATORS = [
-  { key: 'heatwave_days', label: 'Heatwave days' },
-  { key: 'event_count', label: 'Event count' },
-  { key: 'mean_tmax', label: 'Mean Tmax' },
-] as const
+const INDICATORS = ['heatwave_days', 'event_count', 'mean_tmax'] as const
 
 function Row({ label, tip, value }: { label: string; tip: string; value: string }) {
   return (
@@ -91,22 +88,24 @@ function Indicator({ t }: { t: IndicatorTrend }) {
 }
 
 export function StatsPanel({ data }: { data: AnalysisResponse }) {
-  const [active, setActive] = useState<(typeof INDICATORS)[number]['key']>('heatwave_days')
+  const [active, setActive] = useState<(typeof INDICATORS)[number]>('heatwave_days')
+  const labels = hazardView(data).labels
+  const tabLabel = { heatwave_days: labels.days, event_count: 'Event count', mean_tmax: labels.third }
   return (
     <section className="panel" aria-label="Statistical analysis">
       <div className="panel-head">
         <h2>Statistical analysis</h2>
         <div className="segmented" role="tablist" aria-label="Indicator">
-          {INDICATORS.map((i) => (
+          {INDICATORS.map((key) => (
             <button
-              key={i.key}
+              key={key}
               type="button"
               role="tab"
-              aria-selected={active === i.key}
-              className={active === i.key ? 'active' : ''}
-              onClick={() => setActive(i.key)}
+              aria-selected={active === key}
+              className={active === key ? 'active' : ''}
+              onClick={() => setActive(key)}
             >
-              {i.label}
+              {tabLabel[key]}
             </button>
           ))}
         </div>

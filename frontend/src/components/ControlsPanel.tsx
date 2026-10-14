@@ -2,12 +2,12 @@ import { useEffect, useState } from 'react'
 import { Loader2, Play } from 'lucide-react'
 import type { PresetRegion } from '../api/types'
 import {
+  HAZARD_OPTIONS,
   MAX_LABEL_LENGTH,
-  MAX_RUN_DAYS,
-  MIN_RUN_DAYS,
   MIN_YEAR,
   PERCENTILE_OPTIONS,
   describeLocation,
+  hazardOption,
   sameLocation,
   validateLocation,
   validateSelection,
@@ -18,11 +18,12 @@ import {
 import { CitySearch } from './CitySearch'
 import { InfoTip } from './InfoTip'
 
-const HAZARDS = [
-  { id: 'heatwave', label: 'Heatwave', available: true },
-  { id: 'drought', label: 'Drought (not implemented)', available: false },
-  { id: 'heavy_rainfall', label: 'Heavy rainfall (not implemented)', available: false },
-]
+const PERCENTILE_TIPS: Record<string, string> = {
+  heatwave:
+    'A hot day is warmer than this percentile of daily maximum temperatures for the location. Higher percentiles find rarer, more extreme heat.',
+  heavy_rainfall:
+    'A heavy-rain day has more rain than this percentile of wet days (at least 1 mm) in the baseline, as in the ETCCDI R95p index. Higher percentiles find rarer downpours.',
+}
 
 const COORD_DEBOUNCE_MS = 500
 
@@ -126,6 +127,12 @@ export function ControlsPanel({
     </label>
   )
 
+  const hazard = hazardOption(selection.hazard)
+  const chooseHazard = (id: string) => {
+    const next = hazardOption(id)
+    onChange({ hazard: next.id, minDurationDays: next.defaultRun, fillGaps: next.gapFill && selection.fillGaps })
+  }
+
   const cities = presets.filter((p) => p.kind === 'city')
   const states = presets.filter((p) => p.kind === 'state')
   const years = Array.from({ length: maxYear - MIN_YEAR + 1 }, (_, i) => MIN_YEAR + i)
@@ -191,9 +198,9 @@ export function ControlsPanel({
 
       <label className="field">
         <span>Hazard type</span>
-        <select value={selection.hazard} onChange={(e) => onChange({ hazard: e.target.value })} aria-label="Hazard type">
-          {HAZARDS.map((h) => (
-            <option key={h.id} value={h.id} disabled={!h.available}>
+        <select value={selection.hazard} onChange={(e) => chooseHazard(e.target.value)} aria-label="Hazard type">
+          {HAZARD_OPTIONS.map((h) => (
+            <option key={h.id} value={h.id}>
               {h.label}
             </option>
           ))}
@@ -201,30 +208,38 @@ export function ControlsPanel({
       </label>
 
       <div className="coord-grid">
+        {hazard.usesPercentile ? (
+          <label className="field">
+            <span>
+              Threshold percentile <InfoTip text={PERCENTILE_TIPS[hazard.id] ?? PERCENTILE_TIPS.heatwave} />
+            </span>
+            <select
+              value={selection.percentile}
+              aria-label="Threshold percentile"
+              onChange={(e) => onChange({ percentile: Number(e.target.value) })}
+            >
+              {PERCENTILE_OPTIONS.map((p) => (
+                <option key={p} value={p}>
+                  {p}th
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : (
+          <div className="field" data-testid="dry-day-rule">
+            <span>
+              Dry day <InfoTip text="A dry day has less than 1 mm of precipitation (the ETCCDI convention). A missing day is never counted as dry." />
+            </span>
+            <p className="fine static-value">below 1 mm</p>
+          </div>
+        )}
         <label className="field">
-          <span>
-            Threshold percentile{' '}
-            <InfoTip text="A hot day is warmer than this percentile of daily maximum temperatures for the location. Higher percentiles find rarer, more extreme heat." />
-          </span>
-          <select
-            value={selection.percentile}
-            aria-label="Threshold percentile"
-            onChange={(e) => onChange({ percentile: Number(e.target.value) })}
-          >
-            {PERCENTILE_OPTIONS.map((p) => (
-              <option key={p} value={p}>
-                {p}th
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="field">
-          <span>Min. consecutive days</span>
+          <span>{hazard.runLabel}</span>
           <input
             type="number"
             inputMode="numeric"
-            min={MIN_RUN_DAYS}
-            max={MAX_RUN_DAYS}
+            min={hazard.minRun}
+            max={hazard.maxRun}
             step={1}
             value={Number.isNaN(selection.minDurationDays) ? '' : selection.minDurationDays}
             aria-label="Minimum consecutive days"
@@ -258,8 +273,8 @@ export function ControlsPanel({
 
       <fieldset className="field baseline">
         <legend>
-          Percentile baseline{' '}
-          <InfoTip text="The percentile threshold can come from the analysis period itself or from a fixed reference period (e.g. 1991-2020). Results from different baselines are not directly comparable." />
+          {hazard.usesPercentile ? 'Percentile baseline' : 'Precipitation normal baseline'}{' '}
+          <InfoTip text="The threshold (or, for drought, the precipitation normal) can come from the analysis period itself or from a fixed reference period (e.g. 1991-2020). Results from different baselines are not directly comparable." />
         </legend>
         {(['fixed_reference', 'analysis_period'] as BaselineMode[]).map((mode) => (
           <label key={mode} className="radio">
@@ -303,14 +318,22 @@ export function ControlsPanel({
         )}
       </fieldset>
 
-      <label className="radio checkbox">
+      <label className={`radio checkbox${hazard.gapFill ? '' : ' disabled'}`}>
         <input
           type="checkbox"
-          checked={selection.fillGaps}
+          checked={hazard.gapFill && selection.fillGaps}
+          disabled={!hazard.gapFill}
+          aria-label="Fill single-day gaps"
           onChange={(e) => onChange({ fillGaps: e.target.checked })}
         />
         Fill single-day gaps (interpolated, flagged){' '}
-        <InfoTip text="Off by default. When on, an isolated missing day between two observed days is set to their mean so it does not break a heatwave run. Filled days are counted in the data-quality report and never used for the threshold." />
+        <InfoTip
+          text={
+            hazard.gapFill
+              ? 'Off by default. When on, an isolated missing day between two observed days is set to their mean so it does not break a heatwave run. Filled days are counted in the data-quality report and never used for the threshold.'
+              : 'Not available for precipitation: rain is too patchy to interpolate from neighbouring days, so missing days stay missing.'
+          }
+        />
       </label>
 
       {errors.length > 0 && (

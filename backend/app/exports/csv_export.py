@@ -29,6 +29,37 @@ ANNUAL_COLUMNS = [
     ("heatwave_days_rolling_mean", "Heatwave days 5-yr rolling mean"),
     ("event_count_rolling_mean", "Events 5-yr rolling mean"),
 ]
+TEMPERATURE_FIELDS = ("mean_tmax_c", "max_tmax_c", "mean_excess_c")
+
+
+def annual_columns(r: AnalysisResponse) -> list[tuple[str, str]]:
+    """Heatwave keeps the original columns; precipitation hazards swap labels and value columns."""
+    if r.hazard.type == "heatwave":
+        return ANNUAL_COLUMNS
+    labels = r.hazard.labels
+    precip_cols = [
+        ("total_mm", "Annual precipitation (mm)"),
+        ("max_daily_mm", "Wettest day (mm)"),
+        ("percent_of_normal", "Annual precipitation (% of baseline normal)"),
+    ]
+    if r.hazard.type == "heavy_rainfall":
+        precip_cols.insert(2, ("event_total_mm", "Rain on heavy-rain event days (mm)"))
+    renamed = {
+        "event_count": f"{labels['events']} (counted in start year)",
+        "heatwave_days": labels["days"],
+        "longest_event_days": (
+            "Longest dry spell in year (CDD, days)" if r.hazard.type == "drought" else f"{labels['longest']} (days)"
+        ),
+        "heatwave_days_rolling_mean": f"{labels['days']} 5-yr rolling mean",
+    }
+    cols: list[tuple[str, str]] = []
+    for field, header in ANNUAL_COLUMNS:
+        if field in TEMPERATURE_FIELDS:
+            if field == TEMPERATURE_FIELDS[0]:
+                cols += precip_cols
+            continue
+        cols.append((field, renamed.get(field, header)))
+    return cols
 
 
 def safe_cell(value: object) -> str:
@@ -56,18 +87,27 @@ def build_csv(result: AnalysisResponse) -> str:
     r = result
     dq = r.data_quality
     qa = dq.analysis
+    heat = r.hazard.type == "heatwave"
+    unit = "C" if heat else r.hazard.units
+    if r.hazard.percentile is not None:
+        threshold_row = (f"{r.hazard.percentile:g}th percentile threshold ({unit})", r.baseline.threshold_value if not heat else r.baseline.threshold_c)
+    else:
+        threshold_row = (f"Dry-day threshold (below, {unit})", r.baseline.threshold_value)
+    qualifying_day = r.hazard.labels.get("qualifying_day", "hot day")
     meta = [
         ("Region", r.region.label),
         ("Region type", r.region.kind),
         ("Latitude", r.region.latitude),
         ("Longitude", r.region.longitude),
         ("Analysis period", f"{r.period.start_year}-{r.period.end_year}"),
+        *([] if heat else [("Hazard", r.hazard.name)]),
         ("Hazard definition", r.hazard.definition),
-        ("Threshold percentile", r.hazard.percentile),
-        ("Minimum consecutive hot days", r.hazard.min_duration_days),
+        *([("Threshold percentile", r.hazard.percentile)] if r.hazard.percentile is not None else []),
+        (f"Minimum consecutive {qualifying_day}s", r.hazard.min_duration_days),
         ("Baseline mode", r.baseline.mode),
         ("Baseline period", f"{r.baseline.reference_start_year}-{r.baseline.reference_end_year}"),
-        (f"{r.hazard.percentile:g}th percentile threshold (C)", r.baseline.threshold_c),
+        threshold_row,
+        *([] if heat else [("Baseline normal annual precipitation (mm)", r.baseline.normal_annual_total_mm)]),
         ("Data source", f"{r.source.provider} - {r.source.dataset}"),
         ("Data retrieved at (UTC)", r.source.retrieved_at),
         ("Analysis completeness (fraction)", qa.completeness),
@@ -98,8 +138,9 @@ def build_csv(result: AnalysisResponse) -> str:
     if dq.outlier_dates:
         writer.writerow(["#", "Outlier days listed", f"{len(dq.outlier_dates)} of {dq.outlier_total}"])
     writer.writerow([])
-    writer.writerow([header for _, header in ANNUAL_COLUMNS])
+    columns = annual_columns(r)
+    writer.writerow([header for _, header in columns])
     for row in r.annual:
         data = row.model_dump()
-        writer.writerow([safe_cell(data[field]) for field, _ in ANNUAL_COLUMNS])
+        writer.writerow([safe_cell(data[field]) for field, _ in columns])
     return buf.getvalue()

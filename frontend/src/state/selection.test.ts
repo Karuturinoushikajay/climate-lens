@@ -16,6 +16,23 @@ describe('validateSelection', () => {
     expect(validateSelection(DEFAULT_SELECTION, 2025)).toEqual([])
   })
 
+  it('uses per-hazard run-length bounds', () => {
+    expect(validateSelection(sel({ hazard: 'heavy_rainfall', minDurationDays: 1 }), 2025)).toEqual([])
+    expect(validateSelection(sel({ hazard: 'drought', minDurationDays: 30 }), 2025)).toEqual([])
+    expect(validateSelection(sel({ hazard: 'drought', minDurationDays: 3 }), 2025)).toEqual([
+      'Minimum consecutive days must be a whole number from 5 to 60.',
+    ])
+  })
+
+  it('omits percentile for drought and gap fill for precipitation hazards', () => {
+    const drought = toQueryParams(sel({ hazard: 'drought', minDurationDays: 15, fillGaps: true }))
+    expect(drought.percentile).toBeUndefined()
+    expect(drought.fill_gaps).toBeUndefined()
+    const rain = toQueryParams(sel({ hazard: 'heavy_rainfall', minDurationDays: 1, fillGaps: true }))
+    expect(rain.percentile).toBe(95)
+    expect(rain.fill_gaps).toBeUndefined()
+  })
+
   it('rejects invalid coordinates', () => {
     const errors = validateSelection(sel({ location: { kind: 'point', latitude: 95, longitude: 200 } }), 2025)
     expect(errors).toContain('Latitude must be between -90 and 90.')

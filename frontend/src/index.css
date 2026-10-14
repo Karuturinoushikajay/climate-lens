@@ -81,6 +81,8 @@ main { width: min(1400px, 100%); margin: 0 auto; padding: 20px; display: flex; f
 .coord-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .baseline legend { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
 .radio { display: flex; align-items: center; gap: 8px; color: var(--text); font-size: 0.88rem; }
+.radio.disabled { opacity: 0.55; }
+.static-value { margin: 0; padding: 8px 0; }
 .field-error { color: var(--danger); font-size: 0.8rem; margin: 0; padding-left: 18px; }
 
 button.primary, button.secondary {

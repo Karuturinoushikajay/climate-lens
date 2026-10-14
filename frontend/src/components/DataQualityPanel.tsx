@@ -18,7 +18,10 @@ export function DataQualityPanel({ data }: { data: AnalysisResponse }) {
       id: 'implausible',
       label: 'Implausible values',
       value: a.implausible_values,
-      hint: q.plausible_range_c.length === 2 ? `outside ${q.plausible_range_c[0]} to ${q.plausible_range_c[1]} °C` : '',
+      hint:
+        q.plausible_range_c.length === 2
+          ? `outside ${q.plausible_range_c[0]} to ${q.plausible_range_c[1]} ${q.plausible_range_units ?? '°C'}`
+          : '',
     },
     { id: 'duplicate', label: 'Duplicate dates', value: a.duplicate_dates, hint: 'extra rows, first value kept' },
     {
@@ -27,7 +30,12 @@ export function DataQualityPanel({ data }: { data: AnalysisResponse }) {
       value: a.interpolated_days ?? 0,
       hint: gapFillOn ? 'single-day gaps filled (subset of missing)' : 'gap fill off',
     },
-    { id: 'outlier', label: 'Outlier days', value: a.outlier_days ?? 0, hint: 'flagged, kept in analysis' },
+    {
+      id: 'outlier',
+      label: 'Outlier days',
+      value: a.outlier_days ?? 0,
+      hint: (q.outlier_method ?? '').startsWith('not applied') ? 'not screened for precipitation' : 'flagged, kept in analysis',
+    },
   ]
   const flaggedYears = data.annual.filter(
     (r) =>

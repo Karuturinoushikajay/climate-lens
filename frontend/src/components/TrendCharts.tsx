@@ -11,6 +11,7 @@ import {
 } from 'recharts'
 import type { ReactElement } from 'react'
 import type { AnalysisResponse, IndicatorTrend } from '../api/types'
+import { hazardView } from '../utils/hazard'
 import { yearTicks } from '../utils/yearTicks'
 
 const AMBER = '#f2b14c'
@@ -65,6 +66,7 @@ function ChartFrame({ title, subtitle, children }: { title: string; subtitle: st
 
 export function HeatwaveDaysChart({ data }: { data: AnalysisResponse }) {
   const trend = data.trends.heatwave_days
+  const h = hazardView(data)
   const rows = data.annual.map((a) => ({
     year: a.year,
     days: a.heatwave_days,
@@ -73,8 +75,8 @@ export function HeatwaveDaysChart({ data }: { data: AnalysisResponse }) {
   }))
   return (
     <ChartFrame
-      title="Annual heatwave days"
-      subtitle="Days inside heatwave events, attributed to the calendar year they occur in. Line: 5-year rolling mean; dashed: linear fit."
+      title={`Annual ${h.labels.days.toLowerCase()}`}
+      subtitle={`Days inside ${h.labels.events.toLowerCase()}, attributed to the calendar year they occur in. Line: 5-year rolling mean; dashed: linear fit.`}
     >
       <ComposedChart data={rows} margin={{ top: 8, right: 12, bottom: 0, left: -12 }}>
         <CartesianGrid stroke="#22302b" vertical={false} />
@@ -82,7 +84,7 @@ export function HeatwaveDaysChart({ data }: { data: AnalysisResponse }) {
         <YAxis stroke={AXIS} tick={{ fontSize: 11 }} allowDecimals={false} />
         <Tooltip {...tooltipStyle} />
         <Legend wrapperStyle={{ fontSize: 12 }} />
-        <Bar dataKey="days" name="Heatwave days" fill={AMBER} radius={[3, 3, 0, 0]} isAnimationActive={false} />
+        <Bar dataKey="days" name={h.labels.days} fill={AMBER} radius={[3, 3, 0, 0]} isAnimationActive={false} />
         <Line
           dataKey="rolling"
           name="5-yr rolling mean"
@@ -108,6 +110,7 @@ export function HeatwaveDaysChart({ data }: { data: AnalysisResponse }) {
 
 export function EventFrequencyChart({ data }: { data: AnalysisResponse }) {
   const trend = data.trends.event_count
+  const h = hazardView(data)
   const rows = data.annual.map((a) => ({
     year: a.year,
     events: a.event_count,
@@ -116,7 +119,7 @@ export function EventFrequencyChart({ data }: { data: AnalysisResponse }) {
   }))
   return (
     <ChartFrame
-      title="Annual heatwave events"
+      title={`Annual ${h.labels.events.toLowerCase()}`}
       subtitle="Each event is counted once, in the year it starts. Line: 5-year rolling mean; dashed: linear fit."
     >
       <ComposedChart data={rows} margin={{ top: 8, right: 12, bottom: 0, left: -12 }}>
@@ -141,7 +144,49 @@ export function EventFrequencyChart({ data }: { data: AnalysisResponse }) {
   )
 }
 
+export function PrecipitationChart({ data }: { data: AnalysisResponse }) {
+  const h = hazardView(data)
+  const normal = data.baseline.normal_annual_total_mm ?? null
+  const heavy = h.type === 'heavy_rainfall'
+  const rows = data.annual.map((a) => ({
+    year: a.year,
+    total: a.total_mm ?? null,
+    event: heavy ? (a.event_total_mm ?? null) : undefined,
+    wettest: heavy ? (a.max_daily_mm ?? null) : undefined,
+    normal,
+  }))
+  const subtitle = heavy
+    ? `Annual total, rain falling on heavy-rain days, and the wettest day of each year (mm). Heavy-rain threshold ${fmtNum(h.threshold)} mm/day.`
+    : `Annual total precipitation (mm). Dashed line: ${data.baseline.reference_start_year}–${data.baseline.reference_end_year} normal of ${fmtNum(normal, 0)} mm.`
+  return (
+    <ChartFrame title="Annual precipitation" subtitle={subtitle}>
+      <ComposedChart data={rows} margin={{ top: 8, right: 12, bottom: 0, left: -4 }}>
+        <CartesianGrid stroke="#22302b" vertical={false} />
+        <YearAxis years={rows.map((r) => r.year)} bars />
+        <YAxis stroke={AXIS} tick={{ fontSize: 11 }} />
+        <Tooltip {...tooltipStyle} />
+        <Legend wrapperStyle={{ fontSize: 12 }} />
+        <Bar dataKey="total" name="Annual total (mm)" fill={MINT} radius={[3, 3, 0, 0]} isAnimationActive={false} />
+        {heavy && (
+          <Bar dataKey="event" name="On heavy-rain days (mm)" fill={AMBER} radius={[3, 3, 0, 0]} isAnimationActive={false} />
+        )}
+        {heavy && (
+          <Line dataKey="wettest" name="Wettest day (mm)" stroke={AMBER_SOFT} dot={false} strokeWidth={2} isAnimationActive={false} />
+        )}
+        {!heavy && normal !== null && (
+          <Line dataKey="normal" name="Normal" stroke={MUTED} dot={false} strokeDasharray="4 4" isAnimationActive={false} />
+        )}
+      </ComposedChart>
+    </ChartFrame>
+  )
+}
+
+function fmtNum(v: number | null, digits = 1): string {
+  return v === null ? 'n/a' : v.toFixed(digits)
+}
+
 export function TemperatureChart({ data }: { data: AnalysisResponse }) {
+  if (hazardView(data).precip) return <PrecipitationChart data={data} />
   const threshold = data.baseline.threshold_c
   const rows = data.annual.map((a) => ({ year: a.year, mean: a.mean_tmax_c, max: a.max_tmax_c, threshold }))
   return (

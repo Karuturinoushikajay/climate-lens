@@ -134,7 +134,7 @@ export default function App() {
           <Leaf size={22} aria-hidden />
           <div>
             <h1>Climate Lens</h1>
-            <p>Climate Hazard Trend Analyzer · Heatwaves</p>
+            <p>Climate Hazard Trend Analyzer · Heatwaves, heavy rainfall &amp; drought</p>
           </div>
         </div>
         <nav aria-label="Sections">
@@ -232,7 +232,11 @@ export default function App() {
                   cache {shown.data.cache.analysis}
                 </p>
                 <p className="fine" data-testid="result-hazard">
-                  Heatwave: {percentileLabel(shown.data.hazard.percentile)} · {shown.data.hazard.min_duration_days}+ days
+                  {shown.data.hazard.name || 'Heatwave'}:{' '}
+                  {shown.data.hazard.percentile != null
+                    ? percentileLabel(shown.data.hazard.percentile)
+                    : 'dry days below 1 mm'}{' '}
+                  · {shown.data.hazard.min_duration_days}+ days
                   {(shown.data.data_quality.gap_fill ?? 'off') !== 'off' && ' · single-day gaps filled'}
                 </p>
                 <p className="fine" data-testid="result-dataset">
@@ -244,9 +248,15 @@ export default function App() {
 
             <p className="limitations" role="note" data-testid="limitations">
               <strong>Limitations:</strong> values come from ERA5 reanalysis (a model estimate on a 0.25°, roughly 28 km, grid), not
-              from weather stations. The {percentileLabel(shown.data.hazard.percentile)} threshold is relative to this
-              location's own climate, so the same label means different temperatures in different places. A
-              statistically significant trend is an association in this record, not proof of a cause.{' '}
+              from weather stations.{' '}
+              {shown.data.hazard.type === 'drought'
+                ? 'Dry spells are a rainfall indicator, not a declared drought: long dry spells are normal in a dry season, so compare with the baseline.'
+                : `The ${percentileLabel(shown.data.hazard.percentile ?? 95)} threshold is relative to this location's own climate, so the same label means different ${
+                    shown.data.hazard.type === 'heavy_rainfall' ? 'rainfall amounts' : 'temperatures'
+                  } in different places.`}{' '}
+              {shown.data.hazard.type !== 'heatwave' &&
+                'Reanalysis rainfall smooths out local downpours, so extremes are likely underestimated. '}
+              A statistically significant trend is an association in this record, not proof of a cause.{' '}
               <a href="#limitations">Sources &amp; limitations</a>
             </p>
 

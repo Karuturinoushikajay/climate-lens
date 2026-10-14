@@ -160,13 +160,17 @@ def build_insights(
     excluded_years: Sequence[int],
     tmax_change: PercentChange | None = None,
     tmax_mk: MannKendallResult | None = None,
+    words=None,
 ) -> list[str]:
     """Plain-language statements derived only from computed values.
 
     Every headline change carries the Mann-Kendall significance of the same indicator.
     """
+    from .hazards import HAZARDS
+
+    w = words or HAZARDS["heatwave"].words
     insights: list[str] = [
-        f"{label}: {total_events} heatwave event(s) totalling {total_days} heatwave day(s) "
+        f"{label}: {total_events} {w.event_noun} totalling {total_days} {w.day_noun} "
         f"were detected between {start_year} and {end_year}."
     ]
 
@@ -175,18 +179,18 @@ def build_insights(
         if c.percent_change is not None and c.percent_change != 0:
             verb = "higher" if c.percent_change > 0 else "lower"
             insights.append(
-                f"Average annual heatwave days in {c.last_period} ({c.last_mean:.1f}) were "
+                f"Average {w.days_phrase} in {c.last_period} ({c.last_mean:.1f}) were "
                 f"{abs(c.percent_change):.0f}% {verb} than in {c.first_period} ({c.first_mean:.1f}) "
                 f"{hedge(days_mk)}."
             )
         elif c.percent_change == 0:
             insights.append(
-                f"Average annual heatwave days were unchanged between {c.first_period} and "
+                f"Average {w.days_phrase} were unchanged between {c.first_period} and "
                 f"{c.last_period} ({c.first_mean:.1f})."
             )
         else:
             insights.append(
-                f"Average annual heatwave days moved from {c.first_mean:.1f} ({c.first_period}) to "
+                f"Average {w.days_phrase} moved from {c.first_mean:.1f} ({c.first_period}) to "
                 f"{c.last_mean:.1f} ({c.last_period}) {hedge(days_mk)}. {c.note}"
             )
     elif c.note:
@@ -195,19 +199,20 @@ def build_insights(
     r = days_regression
     if r.slope is not None:
         insights.append(
-            f"The fitted linear slope of annual heatwave days is {r.slope * 10:+.2f} days per decade"
+            f"The fitted linear slope of {w.days_phrase} is {r.slope * 10:+.2f} days per decade"
             + (f" (R² = {r.r_squared:.2f})" if r.r_squared is not None else " (constant series)")
             + f" {hedge(days_mk)}. This describes the observed record and is not a forecast."
         )
 
     t = tmax_change
     if t is not None and tmax_mk is not None and t.absolute_change is not None:
+        pct = f" ({t.percent_change:+.0f}%)" if w.third_units == "mm" and t.percent_change is not None else ""
         insights.append(
-            f"Annual mean daily maximum temperature changed by {t.absolute_change:+.2f} °C between "
+            f"{w.third_phrase} changed by {t.absolute_change:+.{w.third_decimals}f} {w.third_units}{pct} between "
             f"{t.first_period} and {t.last_period} {hedge(tmax_mk)}."
         )
 
-    insights.append(f"Mann-Kendall (heatwave days): {mk_statement(days_mk)}")
+    insights.append(f"Mann-Kendall ({w.days_phrase.removeprefix('annual ')}): {mk_statement(days_mk)}")
     insights.append(f"Mann-Kendall (event counts): {mk_statement(events_mk)}")
     if days_mk.significant or events_mk.significant:
         insights.append(

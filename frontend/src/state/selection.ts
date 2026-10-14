@@ -16,6 +16,54 @@ export const PERCENTILE_OPTIONS = [90, 92.5, 95, 97.5, 99] as const
 export const MIN_RUN_DAYS = 2
 export const MAX_RUN_DAYS = 10
 
+export interface HazardOption {
+  id: string
+  label: string
+  minRun: number
+  maxRun: number
+  defaultRun: number
+  usesPercentile: boolean
+  gapFill: boolean
+  runLabel: string
+}
+
+export const HAZARD_OPTIONS: HazardOption[] = [
+  {
+    id: 'heatwave',
+    label: 'Heatwave',
+    minRun: MIN_RUN_DAYS,
+    maxRun: MAX_RUN_DAYS,
+    defaultRun: 3,
+    usesPercentile: true,
+    gapFill: true,
+    runLabel: 'Min. consecutive days',
+  },
+  {
+    id: 'heavy_rainfall',
+    label: 'Heavy rainfall',
+    minRun: 1,
+    maxRun: 10,
+    defaultRun: 1,
+    usesPercentile: true,
+    gapFill: false,
+    runLabel: 'Min. consecutive heavy-rain days',
+  },
+  {
+    id: 'drought',
+    label: 'Drought (dry spells)',
+    minRun: 5,
+    maxRun: 60,
+    defaultRun: 15,
+    usesPercentile: false,
+    gapFill: false,
+    runLabel: 'Min. dry-spell length (days)',
+  },
+]
+
+export function hazardOption(id: string): HazardOption {
+  return HAZARD_OPTIONS.find((h) => h.id === id) ?? HAZARD_OPTIONS[0]
+}
+
 export interface Selection {
   location: Location
   label: string
@@ -105,24 +153,26 @@ export function validateSelection(s: Selection, maxYear = DEFAULT_MAX_YEAR): str
       }
     }
   }
-  if (!(PERCENTILE_OPTIONS as readonly number[]).includes(s.percentile))
+  const h = hazardOption(s.hazard)
+  if (h.usesPercentile && !(PERCENTILE_OPTIONS as readonly number[]).includes(s.percentile))
     errors.push(`Percentile must be one of ${PERCENTILE_OPTIONS.join(', ')}.`)
-  if (!Number.isInteger(s.minDurationDays) || s.minDurationDays < MIN_RUN_DAYS || s.minDurationDays > MAX_RUN_DAYS)
-    errors.push(`Minimum consecutive days must be a whole number from ${MIN_RUN_DAYS} to ${MAX_RUN_DAYS}.`)
+  if (!Number.isInteger(s.minDurationDays) || s.minDurationDays < h.minRun || s.minDurationDays > h.maxRun)
+    errors.push(`Minimum consecutive days must be a whole number from ${h.minRun} to ${h.maxRun}.`)
   if (s.label.length > MAX_LABEL_LENGTH) errors.push(`Label must be ${MAX_LABEL_LENGTH} characters or fewer.`)
   return errors
 }
 
 export function toQueryParams(s: Selection): QueryParams {
+  const h = hazardOption(s.hazard)
   const params: QueryParams = {
     start_year: s.startYear,
     end_year: s.endYear,
     hazard: s.hazard,
     baseline: s.baseline,
-    percentile: s.percentile,
     min_duration_days: s.minDurationDays,
   }
-  if (s.fillGaps) params.fill_gaps = 'true'
+  if (h.usesPercentile) params.percentile = s.percentile
+  if (s.fillGaps && h.gapFill) params.fill_gaps = 'true'
   if (s.location.kind === 'point') {
     params.latitude = round4(s.location.latitude)
     params.longitude = round4(s.location.longitude)
