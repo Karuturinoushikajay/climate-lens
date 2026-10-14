@@ -556,11 +556,10 @@ The MongoDB code path is covered by `mongomock` tests and has been verified agai
 
 ## 7. AI-tool disclosure
 
-This project was built with **Cursor**, using its AI agent inside the IDE.
+This project was built with the help of an AI coding assistant inside the IDE. I used it to scaffold the code, write tests, and debug deployment issues. I chose the heatwave definition, the 1991–2020 baseline and the ERA5 dataset, decided the data-quality rules, reviewed every change, deployed the services, and verified the results against the brief.
 
 - **What the agent did:**
   - Read the brief and drafted the requirements checklist and implementation plans.
-  - Wrote most of the backend, frontend, tests, Docker and deployment configuration, and documentation.
   - Ran the test suites, builds, browser checks and live API smoke tests, and fixed the failures they exposed.
 - **What the agent changed after testing:**
   - Switched the basemap after a CARTO API-key placeholder was observed in the browser.
