@@ -19,6 +19,8 @@ The backend is on Render's free tier, which sleeps after 15 idle minutes; a cold
 > - **Verified locally:** the backend and frontend dev servers, run against the live Open-Meteo API.
 > - **Not yet verified:** the Docker Compose stack. Docker Desktop's Linux engine could not start on the development machine because WSL has no distributions installed. The Compose file validates with `docker compose config`, but the containers were not built or run.
 > - **Deployed and verified live (12 October 2026):** frontend on Vercel, backend on Render, cache on MongoDB Atlas (free M0). Live checks passed for CORS from the Vercel origin, a Hyderabad 1990-2025 analysis, the CSV download, and the PDF download. `/api/health` reports `"mode": "mongodb"`, and a repeated Delhi 2000-2024 analysis went from a cache miss (3.9 s) to a MongoDB cache hit (1.1 s).
+> - **Re-verified live (15 October 2026), algorithm version 2026.10.5:** all three hazards through the deployed UI and API (Hyderabad heatwave, Mumbai heavy rainfall, Jaipur drought, and a Telangana box), with CSV and PDF downloads, CORS from the Vercel origin, `422` for invalid hazard settings, and a 375 px mobile layout without horizontal overflow.
+> - **Continuous integration:** GitHub Actions runs both test suites, the linter and the production build on every push to `main`.
 
 ---
 
