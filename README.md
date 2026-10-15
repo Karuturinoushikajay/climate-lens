@@ -12,7 +12,7 @@ Climate Lens detects heatwaves, heavy-rainfall events and dry spells (drought) i
 **Live demo:** https://climate-lens-gamma.vercel.app
 **API:** https://climate-lens-api.onrender.com/api/health (interactive docs at [/docs](https://climate-lens-api.onrender.com/docs))
 
-The backend is on Render's free tier, which sleeps after 15 idle minutes; a cold start measured on 14 October 2026 took 21 s. A scheduled GitHub Actions job ([`keep-warm.yml`](.github/workflows/keep-warm.yml)) pings `/api/health` every 10 minutes to keep it awake, and if a request still takes longer than 3 s the UI shows "Waking the server, this can take about 30 s".
+The backend is on Render's free tier, which sleeps after 15 idle minutes; a cold start measured on 14 October 2026 took 21 s. A scheduled GitHub Actions job ([`keep-warm.yml`](.github/workflows/keep-warm.yml)) is set to ping `/api/health` every 10 minutes, but GitHub runs schedules on a best-effort basis and in practice ran it only every 4-5 hours (14-15 October 2026), so it does not reliably keep the server awake. If a request takes longer than 3 s, the UI shows "Waking the server, this can take about 30 s".
 
 > **Status, stated honestly**
 > - **Implemented and tested:** the full analysis pipeline, the API, CSV and PDF exports, the dashboard, and the map, for all three hazards (heatwave, heavy rainfall, drought). 170 backend tests and 69 frontend tests pass.
@@ -243,7 +243,7 @@ The live demo was deployed with the steps below, including MongoDB Atlas.
 2. Add the environment variable `VITE_API_BASE_URL=https://<service>.onrender.com`.
 3. Deploy. Then update `ALLOWED_ORIGINS` on Render to the exact Vercel production URL and redeploy the backend. Vercel also gives every deployment its own URL; `ALLOWED_ORIGIN_REGEX` in `render.yaml` allows those for this project's Vercel team.
 
-**Keeping the free backend awake.** [`.github/workflows/keep-warm.yml`](.github/workflows/keep-warm.yml) runs every 10 minutes and requests `/api/health`, which touches neither Open-Meteo nor the rate limits. GitHub runs schedules on a best-effort basis (runs can be late or skipped) and disables them after 60 days without repository activity; one always-on free service uses about 744 of Render's 750 free instance hours a month. A free external monitor such as UptimeRobot on the same URL is a more punctual alternative.
+**Keeping the free backend awake.** [`.github/workflows/keep-warm.yml`](.github/workflows/keep-warm.yml) is scheduled every 10 minutes and requests `/api/health`, which touches neither Open-Meteo nor the rate limits. GitHub runs schedules on a best-effort basis and disables them after 60 days without repository activity; on 14-15 October 2026 it actually ran only every 4-5 hours, so it does not keep the server awake on its own. Its retries span about 4 minutes, so a brief Render restart does not fail the run. one always-on free service uses about 744 of Render's 750 free instance hours a month. A free external monitor such as UptimeRobot on the same URL is a more punctual alternative.
 
 Netlify works too: base directory `frontend`, build command `npm run build`, publish directory `dist`, the same environment variable, and a SPA redirect `/* /index.html 200`.
 
