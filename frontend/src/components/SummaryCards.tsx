@@ -44,8 +44,8 @@ export function SummaryCards({ data }: { data: AnalysisResponse }) {
       icon: <CalendarRange size={18} />,
       id: 'days',
       label: h.labels.days,
-      value: String(s.total_heatwave_days),
-      sub: `${fmt(s.mean_heatwave_days_per_year, 1)} per year`,
+      value: String(s.total_event_days),
+      sub: `${fmt(s.mean_event_days_per_year, 1)} per year`,
       tone: 'amber',
     },
     {

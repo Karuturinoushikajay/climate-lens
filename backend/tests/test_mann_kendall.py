@@ -66,6 +66,7 @@ def test_missing_and_invalid_values_are_dropped():
     r = mann_kendall([1, None, 2, float("nan"), 3, float("inf"), 4, 5])
     assert r.n == 5 and r.dropped_values == 3
     assert r.s == 10
+    assert "3 missing or non-numeric values were excluded before testing." in r.notes
 
 
 def test_missing_years_preserve_order_and_sen_slope():
@@ -91,6 +92,8 @@ def test_autocorrelated_series_is_adjusted():
     assert r.p_value > 0.05
     assert not r.significant
     assert r.interpretation_code == "direction_not_significant"
+    note = next(n for n in r.notes if n.startswith("Serial correlation"))
+    assert "(s)" not in note and ("(lag " in note) == (len(r.autocorrelation_lags) == 1)
 
 
 def test_independent_series_not_adjusted_below_one():

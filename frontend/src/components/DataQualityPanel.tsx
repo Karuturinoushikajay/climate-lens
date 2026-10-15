@@ -19,8 +19,8 @@ export function DataQualityPanel({ data }: { data: AnalysisResponse }) {
       label: 'Implausible values',
       value: a.implausible_values,
       hint:
-        q.plausible_range_c.length === 2
-          ? `outside ${q.plausible_range_c[0]} to ${q.plausible_range_c[1]} ${q.plausible_range_units ?? '°C'}`
+        q.plausible_range.length === 2
+          ? `outside ${q.plausible_range[0]} to ${q.plausible_range[1]} ${q.plausible_range_units ?? '°C'}`
           : '',
     },
     { id: 'duplicate', label: 'Duplicate dates', value: a.duplicate_dates, hint: 'extra rows, first value kept' },
@@ -128,7 +128,7 @@ export function DataQualityPanel({ data }: { data: AnalysisResponse }) {
           <ul>
             {filled.map((f) => (
               <li key={f.date}>
-                {f.date}: {fmt(f.tmax_c, 1, ' °C')} (was {f.reason.replace('_', ' ')})
+                {f.date}: {fmt(f.value, 1, ` ${q.plausible_range_units ?? '°C'}`)} (was {f.reason.replace('_', ' ')})
               </li>
             ))}
           </ul>
@@ -144,7 +144,7 @@ export function DataQualityPanel({ data }: { data: AnalysisResponse }) {
           <ul>
             {outliers.map((o) => (
               <li key={o.date}>
-                {o.date}: {fmt(o.tmax_c, 1, ' °C')} (robust z {o.robust_z > 0 ? '+' : ''}
+                {o.date}: {fmt(o.value, 1, ` ${q.plausible_range_units ?? '°C'}`)} (robust z {o.robust_z > 0 ? '+' : ''}
                 {fmt(o.robust_z, 1)})
               </li>
             ))}

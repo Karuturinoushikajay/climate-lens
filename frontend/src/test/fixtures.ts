@@ -9,6 +9,10 @@ const trend = (indicator: string, code = 'increasing_significant'): IndicatorTre
     slope_per_decade: 15,
     intercept: -2990,
     r_squared: 0.75,
+    slope_se_per_year: 0.866,
+    slope_se_per_decade: 8.66,
+    t_statistic: 1.732,
+    p_value: 0.3333,
     status: 'ok',
     notes: [],
   },
@@ -68,7 +72,8 @@ export function makeAnalysis(label = 'Hyderabad', lat = 17.385, lon = 78.4867, s
       mode: 'analysis_period',
       reference_start_year: start,
       reference_end_year: end,
-      threshold_c: 39.87,
+      threshold_value: 39.87,
+      threshold_units: '°C',
       percentile_method: "numpy 'linear' interpolation (Hyndman & Fan type 7)",
       valid_days_used: 1096,
       note: 'Threshold computed from the selected analysis period.',
@@ -88,9 +93,9 @@ export function makeAnalysis(label = 'Hyderabad', lat = 17.385, lon = 78.4867, s
     cache: { backend: 'memory', analysis: 'miss', observations: 'miss' },
     summary: {
       total_events: 7,
-      total_heatwave_days: 31,
+      total_event_days: 31,
       mean_events_per_year: 2.3333,
-      mean_heatwave_days_per_year: 10.3333,
+      mean_event_days_per_year: 10.3333,
       longest_event_days: 9,
       longest_event_start: `${end}-05-01`,
       longest_event_end: `${end}-05-09`,
@@ -103,7 +108,7 @@ export function makeAnalysis(label = 'Hyderabad', lat = 17.385, lon = 78.4867, s
     annual: years.map((y, i) => ({
       year: y,
       event_count: i + 1,
-      heatwave_days: [5, 10, 16][i] ?? 5,
+      event_days: [5, 10, 16][i] ?? 5,
       longest_event_days: [3, 5, 9][i] ?? 3,
       mean_tmax_c: 32 + i * 0.1,
       max_tmax_c: 43 + i,
@@ -117,14 +122,14 @@ export function makeAnalysis(label = 'Hyderabad', lat = 17.385, lon = 78.4867, s
       duplicate_dates: 0,
       implausible_days: 0,
       outlier_days: i === 1 ? 2 : 0,
-      heatwave_days_rolling_mean: null,
+      event_days_rolling_mean: null,
       event_count_rolling_mean: null,
     })),
     events: [],
     trends: {
-      heatwave_days: trend('Annual heatwave days'),
+      event_days: trend('Annual heatwave days'),
       event_count: trend('Annual heatwave events', 'direction_not_significant'),
-      mean_tmax: trend('Annual mean daily maximum temperature', 'direction_not_significant'),
+      climate_indicator: trend('Annual mean daily maximum temperature', 'direction_not_significant'),
     },
     data_quality: {
       analysis: {
@@ -146,18 +151,18 @@ export function makeAnalysis(label = 'Hyderabad', lat = 17.385, lon = 78.4867, s
       reference: null,
       min_year_completeness: 0.8,
       insufficient_years: [],
-      plausible_range_c: [-60, 60],
+      plausible_range: [-60, 60],
       gap_fill: 'off',
       outlier_method: 'robust z-score |0.6745*(x - median)/MAD| > 4',
       outlier_dates: [
-        { date: `${start + 1}-01-14`, tmax_c: 12.3, robust_z: -5.2 },
-        { date: `${start + 1}-04-02`, tmax_c: 44.9, robust_z: 4.4 },
+        { date: `${start + 1}-01-14`, value: 12.3, robust_z: -5.2 },
+        { date: `${start + 1}-04-02`, value: 44.9, robust_z: 4.4 },
       ],
       outlier_total: 2,
       filled_dates: [],
       filled_total: 0,
     },
-    insights: [`${label}: 7 heatwave event(s) totalling 31 heatwave day(s) were detected between ${start} and ${end}.`],
+    insights: [`${label}: 7 heatwave events totalling 31 heatwave days were detected between ${start} and ${end}.`],
     caveats: ['Data are ERA5-family reanalysis estimates served by Open-Meteo, not weather-station observations.'],
     algorithm_version: 'test',
     generated_at: '2026-10-12T00:00:00+00:00',
@@ -172,7 +177,7 @@ export function makePrecipAnalysis(
   const heavy = hazard === 'heavy_rainfall'
   body.hazard = {
     type: hazard,
-    name: heavy ? 'Heavy rainfall' : 'Drought (dry spells)',
+    name: heavy ? 'Heavy rainfall' : 'Dry spells',
     definition: heavy
       ? 'Heavy-rain day: daily precipitation strictly greater than the 95th percentile of wet-day (>= 1 mm) precipitation in the baseline.'
       : 'Dry spell: at least 15 consecutive valid days with precipitation strictly less than 1 mm.',
@@ -203,7 +208,6 @@ export function makePrecipAnalysis(
   }
   body.baseline = {
     ...body.baseline,
-    threshold_c: null,
     threshold_value: heavy ? 48.6 : 1,
     threshold_units: 'mm',
     normal_annual_total_mm: 812,
@@ -221,10 +225,10 @@ export function makePrecipAnalysis(
     percent_of_normal: [86.2, 101, 104.7][i] ?? 98.5,
     outlier_days: 0,
   }))
-  body.trends.mean_tmax = { ...body.trends.mean_tmax, indicator: 'Annual total precipitation', units: 'mm/year' }
+  body.trends.climate_indicator = { ...body.trends.climate_indicator, indicator: 'Annual total precipitation', units: 'mm/year' }
   body.data_quality = {
     ...body.data_quality,
-    plausible_range_c: [0, 2000],
+    plausible_range: [0, 2000],
     plausible_range_units: 'mm',
     outlier_method: 'not applied to precipitation (a skewed distribution with many zero days)',
     outlier_dates: [],
@@ -232,7 +236,7 @@ export function makePrecipAnalysis(
     analysis: { ...body.data_quality.analysis, outlier_days: 0 },
   }
   body.insights = [
-    `${args[0] ?? 'Hyderabad'}: 7 ${heavy ? 'heavy-rain event(s)' : 'dry spell(s)'} totalling 31 ${heavy ? 'heavy-rain day(s)' : 'dry-spell day(s)'} were detected.`,
+    `${args[0] ?? 'Hyderabad'}: 7 ${heavy ? 'heavy-rain events' : 'dry spells'} totalling 31 ${heavy ? 'heavy-rain days' : 'dry-spell days'} were detected.`,
   ]
   return body
 }

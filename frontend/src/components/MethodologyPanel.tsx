@@ -33,7 +33,7 @@ export function MethodologyPanel({ data }: { data: AnalysisResponse }) {
           <p>{data.hazard.definition}</p>
           <dl>
             <div className="stat-row"><dt>Baseline</dt><dd>{b.mode === 'analysis_period' ? 'Analysis period' : 'Fixed reference'} ({b.reference_start_year}–{b.reference_end_year})</dd></div>
-            <div className="stat-row"><dt>Threshold</dt><dd>{fmt(b.threshold_value ?? b.threshold_c, 2, ` ${b.threshold_units ?? '°C'}`)}</dd></div>
+            <div className="stat-row"><dt>Threshold</dt><dd>{fmt(b.threshold_value, 2, ` ${b.threshold_units ?? '°C'}`)}</dd></div>
             {b.normal_annual_total_mm != null && (
               <div className="stat-row"><dt>Normal annual precipitation</dt><dd>{fmt(b.normal_annual_total_mm, 0, ' mm')}</dd></div>
             )}

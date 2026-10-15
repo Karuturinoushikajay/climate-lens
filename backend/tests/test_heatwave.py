@@ -172,12 +172,12 @@ def test_cross_year_annual_accounting():
 
     assert annual[2000].event_count == 1  # counted in start year only
     assert annual[2001].event_count == 0
-    assert annual[2000].heatwave_days == 3
-    assert annual[2001].heatwave_days == 2
+    assert annual[2000].event_days == 3
+    assert annual[2001].event_days == 2
     assert annual[2000].longest_event_days == 3
     assert annual[2001].longest_event_days == 2
     assert sum(a.event_count for a in annual.values()) == len(events)
-    assert sum(a.heatwave_days for a in annual.values()) == sum(e.duration_days for e in events)
+    assert sum(a.event_days for a in annual.values()) == sum(e.duration_days for e in events)
 
 
 def test_annual_events_vs_days_are_distinct():
@@ -191,7 +191,7 @@ def test_annual_events_vs_days_are_distinct():
     events = detect_events(records, T)
     a = annual_indicators(records, events, T, 2003, 2003)[0]
     assert a.event_count == 2
-    assert a.heatwave_days == 13
+    assert a.event_days == 13
     assert a.longest_event_days == 10
     assert a.mean_excess_c == pytest.approx(HOT - T)
 

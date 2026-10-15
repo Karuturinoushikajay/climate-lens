@@ -63,7 +63,15 @@ def health(request: Request) -> HealthResponse:
             "rate_limit_geocode_per_minute": s.rate_limit_geocode_per_minute,
             "rate_limits_scope": request.app.state.limiter.scope,
         },
+        prewarm=_prewarm_status(request),
     )
+
+
+def _prewarm_status(request: Request) -> dict:
+    prewarmer = request.app.state.prewarmer
+    if prewarmer is not None:
+        return prewarmer.snapshot()
+    return {"done": 0, "total": 0, **request.app.state.prewarm_status}
 
 
 @router.get("/regions", response_model=RegionsResponse, summary="Preset regions")
@@ -93,7 +101,7 @@ def analyze(request: Request, q: QueryParams) -> AnalysisResponse:
 )
 def export_csv(request: Request, q: QueryParams) -> Response:
     result = _run(request, q, "export")
-    filename = safe_filename(result.region.label, result.period.start_year, result.period.end_year, "csv")
+    filename = safe_filename(result.region.label, result.hazard.name, result.period.start_year, result.period.end_year, "csv")
     return Response(
         content="\ufeff" + build_csv(result),
         media_type="text/csv; charset=utf-8",
@@ -108,7 +116,7 @@ def export_csv(request: Request, q: QueryParams) -> Response:
 )
 def export_pdf(request: Request, q: QueryParams) -> Response:
     result = _run(request, q, "export")
-    filename = safe_filename(result.region.label, result.period.start_year, result.period.end_year, "pdf")
+    filename = safe_filename(result.region.label, result.hazard.name, result.period.start_year, result.period.end_year, "pdf")
     return Response(
         content=build_pdf(result),
         media_type="application/pdf",

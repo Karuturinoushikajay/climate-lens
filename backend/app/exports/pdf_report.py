@@ -35,6 +35,16 @@ def _fmt(value: object, digits: int = 2, suffix: str = "") -> str:
     return f"{value}{suffix}"
 
 
+PDF_REPLACEMENTS = {"α": "alpha", "R²": "R-squared", "≥": ">=", "≤": "<=", "–": "-", "→": "to"}
+
+
+def _pdf_text(text: str) -> str:
+    """Helvetica only covers WinAnsi; spell out the few symbols the analysis text uses."""
+    for symbol, plain in PDF_REPLACEMENTS.items():
+        text = text.replace(symbol, plain)
+    return text
+
+
 def _p_value(p: float | None) -> str:
     if p is None:
         return "undefined"
@@ -122,9 +132,13 @@ def _bar_chart(title: str, years: list[int], values: list[float], color) -> Draw
 def _trend_rows(t: IndicatorTrendOut) -> tuple[list[list[object]], list[list[object]]]:
     reg = t.regression
     mk = t.mann_kendall
+    base = t.units.removesuffix("/year")
     reg_rows = [
         ["Indicator", t.indicator],
-        ["Slope", f"{_fmt(reg.slope_per_year, 4)} {t.units} per year ({_fmt(reg.slope_per_decade, 3)} per decade)"],
+        ["Slope", f"{_fmt(reg.slope_per_year, 4)} {base} per year ({_fmt(reg.slope_per_decade, 3)} {base} per decade)"],
+        ["Slope standard error", f"{_fmt(reg.slope_se_per_year, 4)} {base} per year ({_fmt(reg.slope_se_per_decade, 3)} {base} per decade)"],
+        ["t statistic (n - 2 df)", _fmt(reg.t_statistic, 3)],
+        ["Two-sided OLS p-value", _p_value(reg.p_value)],
         ["Intercept", _fmt(reg.intercept, 3)],
         ["R-squared", _fmt(reg.r_squared, 4)],
         ["Annual values used (n)", reg.n],
@@ -173,8 +187,8 @@ def build_pdf(r: AnalysisResponse) -> bytes:
         author="Climate Lens",
         subject=f"{name} trend analysis",
     )
-    P = lambda text, style="body": Paragraph(escape(str(text)), s[style])  # noqa: E731
-    wrap = lambda text: Paragraph(escape(str(text)), s["cell"])  # noqa: E731
+    P = lambda text, style="body": Paragraph(escape(_pdf_text(str(text))), s[style])  # noqa: E731
+    wrap = lambda text: Paragraph(escape(_pdf_text(str(text))), s["cell"])  # noqa: E731
     story: list = []
 
     generated = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
@@ -214,15 +228,15 @@ def build_pdf(r: AnalysisResponse) -> bytes:
         ["Baseline period", f"{r.baseline.reference_start_year}-{r.baseline.reference_end_year}"],
     ]
     if h.percentile is not None:
-        threshold = r.baseline.threshold_c if heat else r.baseline.threshold_value
+        threshold = r.baseline.threshold_value
         def_rows += [
             ["Threshold percentile", f"{h.percentile:g}th"],
-            [f"Minimum consecutive {qualifying_day}s", h.min_duration_days],
+            [f"Minimum run length ({qualifying_day}s)", h.min_duration_days],
             [f"{h.percentile:g}th-percentile threshold", _fmt(threshold, 2, f" {unit}")],
         ]
     else:
         def_rows += [
-            [f"Minimum consecutive {qualifying_day}s", h.min_duration_days],
+            [f"Minimum run length ({qualifying_day}s)", h.min_duration_days],
             ["Dry-day threshold", f"below {_fmt(r.baseline.threshold_value, 1, ' mm')}"],
         ]
     if not heat:
@@ -242,9 +256,9 @@ def build_pdf(r: AnalysisResponse) -> bytes:
     )
     summary_rows: list[list[object]] = [
         [f"Total {events_label.lower()}", sm.total_events],
-        [f"Total {days_label.lower()}", sm.total_heatwave_days],
+        [f"Total {days_label.lower()}", sm.total_event_days],
         ["Mean events per year", _fmt(sm.mean_events_per_year, 2)],
-        [f"Mean {days_label.lower()} per year", _fmt(sm.mean_heatwave_days_per_year, 2)],
+        [f"Mean {days_label.lower()} per year", _fmt(sm.mean_event_days_per_year, 2)],
         ["Longest event", longest],
     ]
     if heat:
@@ -266,7 +280,7 @@ def build_pdf(r: AnalysisResponse) -> bytes:
 
     years = [a.year for a in r.annual]
     story.append(Spacer(1, 6))
-    story.append(KeepTogether([_bar_chart(f"Annual {days_label.lower()}", years, [a.heatwave_days for a in r.annual], AMBER)]))
+    story.append(KeepTogether([_bar_chart(f"Annual {days_label.lower()}", years, [a.event_days for a in r.annual], AMBER)]))
     story.append(KeepTogether([_bar_chart(f"Annual {events_label.lower()} (counted in start year)", years, [a.event_count for a in r.annual], MINT)]))
     if not heat:
         story.append(KeepTogether([_bar_chart("Annual precipitation (mm)", years, [a.total_mm or 0 for a in r.annual], FOREST)]))
@@ -276,13 +290,13 @@ def build_pdf(r: AnalysisResponse) -> bytes:
     if heat:
         rows = [["Year", "Heatwave days", "Longest event (days)", "Mean excess (°C)", "Mean Tmax (°C)", "Completeness", "Used in trends"]]
         for a in r.annual:
-            rows.append([a.year, a.heatwave_days, a.longest_event_days, _fmt(a.mean_excess_c), _fmt(a.mean_tmax_c), f"{a.completeness * 100:.1f}%", _fmt(a.sufficient_data)])
+            rows.append([a.year, a.event_days, a.longest_event_days, _fmt(a.mean_excess_c), _fmt(a.mean_tmax_c), f"{a.completeness * 100:.1f}%", _fmt(a.sufficient_data)])
     else:
         longest_col = "Longest dry spell (days)" if h.type == "drought" else "Longest run (days)"
         rows = [["Year", days_label, longest_col, "Total (mm)", "% of normal", "Wettest day (mm)", "Completeness", "Used in trends"]]
         for a in r.annual:
             rows.append([
-                a.year, a.heatwave_days, a.longest_event_days, _fmt(a.total_mm, 0), _fmt(a.percent_of_normal, 0, "%"),
+                a.year, a.event_days, a.longest_event_days, _fmt(a.total_mm, 0), _fmt(a.percent_of_normal, 0, "%"),
                 _fmt(a.max_daily_mm, 1), f"{a.completeness * 100:.1f}%", _fmt(a.sufficient_data),
             ])
     story.append(_table(rows))
@@ -292,19 +306,19 @@ def build_pdf(r: AnalysisResponse) -> bytes:
     rows = [["Year", "Events", "5-yr rolling mean (events)", days_label, "5-yr rolling mean (days)", last_col]]
     for a in r.annual:
         last = _fmt(a.max_tmax_c) if heat else _fmt(a.event_total_mm if h.type == "heavy_rainfall" else a.total_mm, 0)
-        rows.append([a.year, a.event_count, _fmt(a.event_count_rolling_mean), a.heatwave_days, _fmt(a.heatwave_days_rolling_mean), last])
+        rows.append([a.year, a.event_count, _fmt(a.event_count_rolling_mean), a.event_days, _fmt(a.event_days_rolling_mean), last])
     story.append(_table(rows))
 
     story.append(Paragraph("Linear regression (descriptive)", s["h2"]))
-    story.append(P("Ordinary least squares of each annual indicator on year, using years that meet the completeness rule. The slope describes the observed record; it is not a forecast or a significance test.", "small"))
-    for t in (r.trends.heatwave_days, r.trends.event_count, r.trends.mean_tmax):
+    story.append(P("Ordinary least squares of each annual indicator on year, using years that meet the completeness rule. The slope describes the observed record; it is not a forecast. The standard error and two-sided t-test p-value (n - 2 degrees of freedom) assume independent, normally distributed residuals, which annual climate series often violate, so the Mann-Kendall test below remains the headline significance test.", "small"))
+    for t in (r.trends.event_days, r.trends.event_count, r.trends.climate_indicator):
         reg_rows, _ = _trend_rows(t)
         story.append(_table([[a, wrap(b)] for a, b in reg_rows], [55 * mm, 119 * mm], header=False))
         story.append(Spacer(1, 4))
 
     story.append(Paragraph("Mann-Kendall trend test", s["h2"]))
     story.append(P("Non-parametric test for a monotonic trend. Var(S) uses the tie correction; Z uses a continuity correction; the p-value is two-sided from the normal approximation.", "small"))
-    for t in (r.trends.heatwave_days, r.trends.event_count, r.trends.mean_tmax):
+    for t in (r.trends.event_days, r.trends.event_count, r.trends.climate_indicator):
         _, mk_rows = _trend_rows(t)
         story.append(_table([[a, wrap(b)] for a, b in mk_rows], [55 * mm, 119 * mm], header=False))
         for note in t.mann_kendall.notes:
@@ -321,7 +335,7 @@ def build_pdf(r: AnalysisResponse) -> bytes:
         ["Missing days (absent + null)", qa.missing_dates + qa.null_values],
         ["Dates absent from provider", qa.missing_dates],
         ["Null values from provider", qa.null_values],
-        [f"Implausible values (outside {q.plausible_range_c[0]:g} to {q.plausible_range_c[1]:g} {q.plausible_range_units})", qa.implausible_values],
+        [f"Implausible values (outside {q.plausible_range[0]:g} to {q.plausible_range[1]:g} {q.plausible_range_units})", qa.implausible_values],
         ["Duplicate dates", qa.duplicate_dates],
         ["Interpolated days (gap fill)", qa.interpolated_days],
         ["Statistical outlier days (flagged, kept)", qa.outlier_days],
@@ -338,12 +352,12 @@ def build_pdf(r: AnalysisResponse) -> bytes:
         story.append(Spacer(1, 3))
         story.append(P(f"Outlier method: {q.outlier_method}.", "small"))
     if q.outlier_dates:
-        listed = "; ".join(f"{o.date} ({o.tmax_c:.1f} °C, z {o.robust_z:+.1f})" for o in q.outlier_dates)
+        listed = "; ".join(f"{o.date} ({o.value:.1f} {q.plausible_range_units}, z {o.robust_z:+.1f})" for o in q.outlier_dates)
         story.append(
             P(f"Most extreme flagged days (showing {len(q.outlier_dates)} of {q.outlier_total}): {listed}.", "small")
         )
     if q.filled_dates:
-        listed = "; ".join(f"{f.date} ({f.tmax_c:.1f} °C, was {f.reason.replace('_', ' ')})" for f in q.filled_dates)
+        listed = "; ".join(f"{f.date} ({f.value:.1f} {q.plausible_range_units}, was {f.reason.replace('_', ' ')})" for f in q.filled_dates)
         story.append(P(f"Filled days (showing {len(q.filled_dates)} of {q.filled_total}): {listed}.", "small"))
 
     story.append(Paragraph("Annual data quality", s["h2"]))

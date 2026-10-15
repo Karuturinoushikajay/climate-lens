@@ -151,7 +151,9 @@ def mann_kendall(
     n = len(pairs)
     result = MannKendallResult(n=n, alpha=alpha, dropped_values=dropped)
     if dropped:
-        result.notes.append(f"{dropped} missing or non-numeric value(s) were excluded before testing.")
+        result.notes.append(
+            f"{dropped} missing or non-numeric {'value was' if dropped == 1 else 'values were'} excluded before testing."
+        )
     if n < MIN_OBSERVATIONS:
         result.notes.append(f"At least {MIN_OBSERVATIONS} observations are required; {n} available.")
         return result
@@ -200,7 +202,7 @@ def mann_kendall(
     result.autocorrelation_lags = lags
     if factor > 1:
         result.notes.append(
-            f"Serial correlation detected (lag(s) {', '.join(map(str, lags))}); the variance was inflated by "
+            f"Serial correlation detected ({'lag' if len(lags) == 1 else 'lags'} {', '.join(map(str, lags))}); the variance was inflated by "
             f"{factor:.2f}x (Hamed-Rao), which makes the test more conservative."
         )
 

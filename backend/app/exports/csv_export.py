@@ -11,7 +11,7 @@ FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
 ANNUAL_COLUMNS = [
     ("year", "Year"),
     ("event_count", "Heatwave events (counted in start year)"),
-    ("heatwave_days", "Heatwave days"),
+    ("event_days", "Heatwave days"),
     ("longest_event_days", "Longest event contribution (days)"),
     ("mean_tmax_c", "Mean daily max temperature (C)"),
     ("max_tmax_c", "Highest daily max temperature (C)"),
@@ -26,7 +26,7 @@ ANNUAL_COLUMNS = [
     ("outlier_days", "Statistical outlier days (flagged, kept)"),
     ("completeness", "Completeness (fraction)"),
     ("sufficient_data", "Used in trend statistics"),
-    ("heatwave_days_rolling_mean", "Heatwave days 5-yr rolling mean"),
+    ("event_days_rolling_mean", "Heatwave days 5-yr rolling mean"),
     ("event_count_rolling_mean", "Events 5-yr rolling mean"),
 ]
 TEMPERATURE_FIELDS = ("mean_tmax_c", "max_tmax_c", "mean_excess_c")
@@ -46,11 +46,11 @@ def annual_columns(r: AnalysisResponse) -> list[tuple[str, str]]:
         precip_cols.insert(2, ("event_total_mm", "Rain on heavy-rain event days (mm)"))
     renamed = {
         "event_count": f"{labels['events']} (counted in start year)",
-        "heatwave_days": labels["days"],
+        "event_days": labels["days"],
         "longest_event_days": (
             "Longest dry spell in year (CDD, days)" if r.hazard.type == "drought" else f"{labels['longest']} (days)"
         ),
-        "heatwave_days_rolling_mean": f"{labels['days']} 5-yr rolling mean",
+        "event_days_rolling_mean": f"{labels['days']} 5-yr rolling mean",
     }
     cols: list[tuple[str, str]] = []
     for field, header in ANNUAL_COLUMNS:
@@ -76,9 +76,14 @@ def safe_cell(value: object) -> str:
     return text
 
 
-def safe_filename(label: str, start: int, end: int, ext: str) -> str:
-    slug = re.sub(r"[^A-Za-z0-9]+", "-", label).strip("-").lower()[:50] or "region"
-    return f"climate-lens-{slug}-{start}-{end}.{ext}"
+def _slug(text: str, limit: int) -> str:
+    return re.sub(r"[^A-Za-z0-9]+", "-", text).strip("-").lower()[:limit]
+
+
+def safe_filename(label: str, hazard: str, start: int, end: int, ext: str) -> str:
+    slug = _slug(label, 50) or "region"
+    hazard_slug = _slug(hazard, 20) or "hazard"
+    return f"climate-lens-{slug}-{hazard_slug}-{start}-{end}.{ext}"
 
 
 def build_csv(result: AnalysisResponse) -> str:
@@ -90,7 +95,7 @@ def build_csv(result: AnalysisResponse) -> str:
     heat = r.hazard.type == "heatwave"
     unit = "C" if heat else r.hazard.units
     if r.hazard.percentile is not None:
-        threshold_row = (f"{r.hazard.percentile:g}th percentile threshold ({unit})", r.baseline.threshold_value if not heat else r.baseline.threshold_c)
+        threshold_row = (f"{r.hazard.percentile:g}th percentile threshold ({unit})", r.baseline.threshold_value)
     else:
         threshold_row = (f"Dry-day threshold (below, {unit})", r.baseline.threshold_value)
     qualifying_day = r.hazard.labels.get("qualifying_day", "hot day")
@@ -100,7 +105,7 @@ def build_csv(result: AnalysisResponse) -> str:
         ("Latitude", r.region.latitude),
         ("Longitude", r.region.longitude),
         ("Analysis period", f"{r.period.start_year}-{r.period.end_year}"),
-        *([] if heat else [("Hazard", r.hazard.name)]),
+        ("Hazard", r.hazard.name),
         ("Hazard definition", r.hazard.definition),
         *([("Threshold percentile", r.hazard.percentile)] if r.hazard.percentile is not None else []),
         (f"Minimum consecutive {qualifying_day}s", r.hazard.min_duration_days),
@@ -130,11 +135,11 @@ def build_csv(result: AnalysisResponse) -> str:
     for k, v in meta:
         writer.writerow(["#", safe_cell(k), safe_cell(v)])
     for f in dq.filled_dates:
-        writer.writerow(["#", "Filled day (date, value C, original flag)", f.date, safe_cell(f.tmax_c), f.reason])
+        writer.writerow(["#", f"Filled day (date, value {unit}, original flag)", f.date, safe_cell(f.value), f.reason])
     if dq.filled_total > len(dq.filled_dates):
         writer.writerow(["#", "Filled days listed", f"{len(dq.filled_dates)} of {dq.filled_total}"])
     for o in dq.outlier_dates:
-        writer.writerow(["#", "Outlier day (date, value C, robust z)", o.date, safe_cell(o.tmax_c), safe_cell(o.robust_z)])
+        writer.writerow(["#", f"Outlier day (date, value {unit}, robust z)", o.date, safe_cell(o.value), safe_cell(o.robust_z)])
     if dq.outlier_dates:
         writer.writerow(["#", "Outlier days listed", f"{len(dq.outlier_dates)} of {dq.outlier_total}"])
     writer.writerow([])

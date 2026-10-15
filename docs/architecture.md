@@ -75,4 +75,6 @@ flowchart LR
 
 - MongoDB TTL indexes (`expires_at`, `expireAfterSeconds: 0`) remove expired documents. Reads also check `expires_at`, because the TTL monitor runs only about once a minute.
 - If MongoDB is unreachable at startup, the app falls back to the in-memory cache and `/api/health` reports this. If MongoDB fails at runtime, the operation is logged, treated as a cache miss, and health reports `healthy: false`.
+- With MongoDB, a background thread started from the FastAPI `lifespan` pre-warms the preset cities' default analyses for every hazard (`services/prewarm.py`). It skips anything already cached, spaces provider fetches 120 s apart, stops at the first quota error, and reports progress in `/api/health` under `prewarm`.
+- Open-ocean points are rejected during request validation using a precomputed 0.1° near-land grid (`services/land.py`, `data/land_mask.npz`), before any cache or provider call.
 - The in-memory cache is **per process**. The rate limiter is shared through MongoDB when it is configured, so several instances, overlapping deploys and restarts all see the same counts; without MongoDB, or if a MongoDB call fails, it falls back to per-process counters. Redis would give lower latency for both (`SETEX` for the cache, a sorted-set sliding window for the limiter).

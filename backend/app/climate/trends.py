@@ -21,6 +21,9 @@ class RegressionResult:
     slope: float | None = None
     intercept: float | None = None
     r_squared: float | None = None
+    slope_se: float | None = None
+    t_statistic: float | None = None
+    p_value: float | None = None
     status: str = "insufficient_data"  # ok | insufficient_data | constant_series
     notes: list[str] = field(default_factory=list)
 
@@ -35,6 +38,11 @@ class PercentChange:
     percent_change: float | None = None
     absolute_change: float | None = None
     note: str | None = None
+
+
+def plural(n: int, noun: str) -> str:
+    """'1 heavy-rain day', '3 heavy-rain days'."""
+    return f"{n} {noun}" if n == 1 else f"{n} {noun}s"
 
 
 def _finite(v: object) -> bool:
@@ -67,11 +75,67 @@ def linear_regression(xs: Sequence[float], ys: Sequence[float | None]) -> Regres
     result.intercept = mean_y - slope * mean_x
     if syy == 0:
         result.status = "constant_series"
-        result.notes.append("The series is constant; R-squared is undefined.")
+        result.slope_se = 0.0
+        result.notes.append("The series is constant; R-squared and the slope p-value are undefined.")
         return result
     result.r_squared = (sxy * sxy) / (sxx * syy)
     result.status = "ok"
+    df = n - 2
+    sse = max(syy - slope * sxy, 0.0)
+    result.slope_se = math.sqrt(sse / df / sxx)
+    if result.slope_se == 0:
+        result.p_value = 0.0
+        result.notes.append("The points lie exactly on a line; the t statistic is unbounded.")
+    else:
+        result.t_statistic = slope / result.slope_se
+        result.p_value = t_two_sided_p(result.t_statistic, df)
     return result
+
+
+def _betacf(a: float, b: float, x: float) -> float:
+    """Continued fraction for the incomplete beta function (modified Lentz)."""
+    tiny, eps = 1e-300, 1e-15
+    qab, qap, qam = a + b, a + 1.0, a - 1.0
+    c, d = 1.0, 1.0 - qab * x / qap
+    d = 1.0 / (d if abs(d) > tiny else tiny)
+    h = d
+    for m in range(1, 300):
+        m2 = 2 * m
+        aa = m * (b - m) * x / ((qam + m2) * (a + m2))
+        d = 1.0 + aa * d
+        d = 1.0 / (d if abs(d) > tiny else tiny)
+        c = 1.0 + aa / c
+        c = c if abs(c) > tiny else tiny
+        h *= d * c
+        aa = -(a + m) * (qab + m) * x / ((a + m2) * (qap + m2))
+        d = 1.0 + aa * d
+        d = 1.0 / (d if abs(d) > tiny else tiny)
+        c = 1.0 + aa / c
+        c = c if abs(c) > tiny else tiny
+        delta = d * c
+        h *= delta
+        if abs(delta - 1.0) < eps:
+            break
+    return h
+
+
+def regularized_incomplete_beta(a: float, b: float, x: float) -> float:
+    """I_x(a, b) for a, b > 0 and 0 <= x <= 1."""
+    if x <= 0:
+        return 0.0
+    if x >= 1:
+        return 1.0
+    log_front = math.lgamma(a + b) - math.lgamma(a) - math.lgamma(b) + a * math.log(x) + b * math.log1p(-x)
+    if x < (a + 1) / (a + b + 2):
+        return math.exp(log_front) * _betacf(a, b, x) / a
+    return 1.0 - math.exp(log_front) * _betacf(b, a, 1.0 - x) / b
+
+
+def t_two_sided_p(t: float, df: int) -> float:
+    """Two-sided p-value of Student's t with ``df`` degrees of freedom."""
+    if not math.isfinite(t):
+        return 0.0
+    return min(max(regularized_incomplete_beta(df / 2.0, 0.5, df / (df + t * t)), 0.0), 1.0)
 
 
 def rolling_mean(values: Sequence[float | None], window: int = 5) -> list[float | None]:
@@ -169,9 +233,10 @@ def build_insights(
     from .hazards import HAZARDS
 
     w = words or HAZARDS["heatwave"].words
+    verb = "was" if total_events == 1 else "were"
     insights: list[str] = [
-        f"{label}: {total_events} {w.event_noun} totalling {total_days} {w.day_noun} "
-        f"were detected between {start_year} and {end_year}."
+        f"{label}: {plural(total_events, w.event_noun)} totalling {plural(total_days, w.day_noun)} "
+        f"{verb} detected between {start_year} and {end_year}."
     ]
 
     c = days_change
@@ -222,6 +287,7 @@ def build_insights(
 
     if excluded_years:
         insights.append(
-            f"{len(excluded_years)} year(s) with insufficient data coverage were excluded from trend statistics."
+            f"{plural(len(excluded_years), 'year')} with insufficient data coverage "
+            f"{'was' if len(excluded_years) == 1 else 'were'} excluded from trend statistics."
         )
     return insights

@@ -18,6 +18,7 @@ from .errors import AppError
 from .security.rate_limit import HitStore, MemoryHitStore, MongoHitStore, RateLimiter
 from .services.analysis import AnalysisService
 from .services.geocoding import GeocodingService
+from .services.prewarm import Prewarmer
 from .services.weather import OpenMeteoClient
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -49,7 +50,12 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        prewarmer: Prewarmer | None = app.state.prewarmer
+        if prewarmer is not None:
+            prewarmer.start()
         yield
+        if prewarmer is not None:
+            prewarmer.stop()
         app.state.weather.close()
 
     app = FastAPI(
@@ -70,6 +76,17 @@ def create_app(
         settings.upstream_backoff_seconds,
     )
     app.state.service = AnalysisService(settings, app.state.cache, app.state.weather)
+    app.state.prewarmer = None
+    if not settings.prewarm_enabled:
+        app.state.prewarm_status = {"status": "disabled", "detail": "PREWARM_ENABLED is false"}
+    elif not isinstance(app.state.cache, MongoCache):
+        app.state.prewarm_status = {"status": "disabled", "detail": "needs the shared MongoDB cache"}
+    else:
+        app.state.prewarmer = Prewarmer(
+            app.state.service,
+            delay_seconds=settings.prewarm_delay_seconds,
+            start_delay_seconds=settings.prewarm_start_delay_seconds,
+        )
     app.state.geocoder = GeocodingService(
         app.state.weather, app.state.cache, settings.open_meteo_geocoding_url, settings.geocode_cache_ttl_hours
     )

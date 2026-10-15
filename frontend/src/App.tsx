@@ -134,7 +134,7 @@ export default function App() {
           <Leaf size={22} aria-hidden />
           <div>
             <h1>Climate Lens</h1>
-            <p>Climate Hazard Trend Analyzer · Heatwaves, heavy rainfall &amp; drought</p>
+            <p>Climate Hazard Trend Analyzer · Heatwaves, heavy rainfall &amp; dry spells</p>
           </div>
         </div>
         <nav aria-label="Sections">

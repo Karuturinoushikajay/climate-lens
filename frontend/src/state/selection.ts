@@ -12,7 +12,9 @@ export type Location =
 
 export type BaselineMode = 'analysis_period' | 'fixed_reference'
 
-export const PERCENTILE_OPTIONS = [90, 92.5, 95, 97.5, 99] as const
+export const PERCENTILE_MIN = 90
+export const PERCENTILE_MAX = 99.9
+export const PERCENTILE_PRESETS = [90, 92.5, 95, 97.5, 99, 99.9] as const
 export const MIN_RUN_DAYS = 2
 export const MAX_RUN_DAYS = 10
 
@@ -50,7 +52,7 @@ export const HAZARD_OPTIONS: HazardOption[] = [
   },
   {
     id: 'drought',
-    label: 'Drought (dry spells)',
+    label: 'Dry spells',
     minRun: 5,
     maxRun: 60,
     defaultRun: 15,
@@ -130,6 +132,10 @@ export function validateLocation(loc: Location): string[] {
   return errors
 }
 
+export function validPercentile(p: number): boolean {
+  return Number.isFinite(p) && p >= PERCENTILE_MIN && p <= PERCENTILE_MAX && Math.abs(p * 10 - Math.round(p * 10)) < 1e-9
+}
+
 export function validateSelection(s: Selection, maxYear = DEFAULT_MAX_YEAR): string[] {
   const errors = validateLocation(s.location)
   if (!Number.isInteger(s.startYear) || !Number.isInteger(s.endYear)) errors.push('Years must be whole numbers.')
@@ -154,8 +160,8 @@ export function validateSelection(s: Selection, maxYear = DEFAULT_MAX_YEAR): str
     }
   }
   const h = hazardOption(s.hazard)
-  if (h.usesPercentile && !(PERCENTILE_OPTIONS as readonly number[]).includes(s.percentile))
-    errors.push(`Percentile must be one of ${PERCENTILE_OPTIONS.join(', ')}.`)
+  if (h.usesPercentile && !validPercentile(s.percentile))
+    errors.push(`Percentile must be from ${PERCENTILE_MIN} to ${PERCENTILE_MAX}, with at most one decimal place.`)
   if (!Number.isInteger(s.minDurationDays) || s.minDurationDays < h.minRun || s.minDurationDays > h.maxRun)
     errors.push(`Minimum consecutive days must be a whole number from ${h.minRun} to ${h.maxRun}.`)
   if (s.label.length > MAX_LABEL_LENGTH) errors.push(`Label must be ${MAX_LABEL_LENGTH} characters or fewer.`)

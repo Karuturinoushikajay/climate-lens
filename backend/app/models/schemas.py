@@ -15,8 +15,10 @@ from ..config import (
     MIN_YEAR,
     latest_complete_year,
 )
+from ..services.land import OCEAN_BOX_MESSAGE, OCEAN_MESSAGE, box_has_land, near_land
 
-ALLOWED_PERCENTILES = (90.0, 92.5, 95.0, 97.5, 99.0)
+PERCENTILE_RANGE = (90.0, 99.9)
+DEFAULT_PERCENTILE = 95.0
 DURATION_HELP = "; ".join(
     f"{k} {lo}-{hi} (default {d})" for k, (lo, hi, d) in ((k, s.duration_bounds) for k, s in HAZARDS.items())
 )
@@ -51,10 +53,11 @@ class AnalysisQuery(BaseModel):
     )
     reference_start_year: int = Field(1991, description="Reference period start (fixed_reference only)")
     reference_end_year: int = Field(2020, description="Reference period end (fixed_reference only)")
-    percentile: float = Field(
-        95.0,
-        description=f"Threshold percentile for heatwave (Tmax) and heavy_rainfall (wet days); ignored for drought. "
-        f"One of {', '.join(f'{p:g}' for p in ALLOWED_PERCENTILES)}",
+    percentile: float | None = Field(
+        None,
+        description=f"Threshold percentile for heatwave (Tmax) and heavy_rainfall (wet days): "
+        f"{PERCENTILE_RANGE[0]:g} to {PERCENTILE_RANGE[1]:g} in steps of 0.1 (default {DEFAULT_PERCENTILE:g}). "
+        "Not accepted for drought (dry spells use a fixed < 1 mm rule).",
     )
     min_duration_days: int | None = Field(
         None, description=f"Minimum run length in days; per hazard: {DURATION_HELP}"
@@ -66,10 +69,13 @@ class AnalysisQuery(BaseModel):
 
     @field_validator("percentile")
     @classmethod
-    def _percentile_allowed(cls, v: float) -> float:
-        if v not in ALLOWED_PERCENTILES:
-            raise ValueError(f"percentile must be one of {', '.join(f'{p:g}' for p in ALLOWED_PERCENTILES)}.")
-        return float(v)
+    def _percentile_allowed(cls, v: float | None) -> float | None:
+        if v is None:
+            return None
+        lo, hi = PERCENTILE_RANGE
+        if not (lo <= v <= hi and abs(v * 10 - round(v * 10)) < 1e-9):
+            raise ValueError(f"percentile must be between {lo:g} and {hi:g}, with at most one decimal place.")
+        return round(float(v), 1)
 
     @field_validator("hazard")
     @classmethod
@@ -103,10 +109,20 @@ class AnalysisQuery(BaseModel):
                 raise ValueError("Box west must be less than east (boxes crossing the antimeridian are not supported).")
             if self.north - self.south > MAX_BOX_SPAN_DEGREES or self.east - self.west > MAX_BOX_SPAN_DEGREES:  # type: ignore[operator]
                 raise ValueError(f"Box sides must not exceed {MAX_BOX_SPAN_DEGREES:g} degrees.")
+            if not box_has_land(self.south, self.west, self.north, self.east):  # type: ignore[arg-type]
+                raise ValueError(OCEAN_BOX_MESSAGE)
         elif not has_point or any(v is None for v in point):
             raise ValueError("Both latitude and longitude are required.")
+        elif not near_land(self.latitude, self.longitude):  # type: ignore[arg-type]
+            raise ValueError(OCEAN_MESSAGE)
 
         spec = HAZARDS[self.hazard]
+        if not spec.uses_percentile and self.percentile is not None:
+            raise ValueError(
+                f"percentile does not apply to {self.hazard} (dry spells use a fixed < 1 mm dry-day rule); remove it."
+            )
+        if spec.uses_percentile and self.percentile is None:
+            self.percentile = DEFAULT_PERCENTILE
         lo, hi, default = spec.duration_bounds
         if self.min_duration_days is None:
             self.min_duration_days = default
@@ -191,8 +207,7 @@ class BaselineOut(BaseModel):
     mode: str
     reference_start_year: int
     reference_end_year: int
-    threshold_c: float | None = Field(description="Heatwave threshold in °C; null for precipitation hazards")
-    threshold_value: float | None = Field(None, description="Threshold in the hazard's units")
+    threshold_value: float | None = Field(None, description="Threshold in threshold_units (°C or mm)")
     threshold_units: str = "°C"
     normal_annual_total_mm: float | None = Field(
         None, description="Mean annual precipitation over the baseline years (precipitation hazards)"
@@ -223,9 +238,9 @@ class CacheOut(BaseModel):
 
 class SummaryOut(BaseModel):
     total_events: int
-    total_heatwave_days: int
+    total_event_days: int = Field(description="Days inside qualifying events (heatwave, heavy-rain or dry-spell days)")
     mean_events_per_year: float
-    mean_heatwave_days_per_year: float
+    mean_event_days_per_year: float
     longest_event_days: int
     longest_event_start: str | None
     longest_event_end: str | None
@@ -241,7 +256,7 @@ class SummaryOut(BaseModel):
 class AnnualOut(BaseModel):
     year: int
     event_count: int
-    heatwave_days: int
+    event_days: int
     longest_event_days: int
     mean_tmax_c: float | None
     max_tmax_c: float | None
@@ -260,7 +275,7 @@ class AnnualOut(BaseModel):
     duplicate_dates: int = 0
     implausible_days: int = 0
     outlier_days: int = 0
-    heatwave_days_rolling_mean: float | None
+    event_days_rolling_mean: float | None
     event_count_rolling_mean: float | None
 
 
@@ -289,6 +304,14 @@ class RegressionOut(BaseModel):
     slope_per_decade: float | None
     intercept: float | None
     r_squared: float | None
+    slope_se_per_year: float | None = Field(None, description="OLS standard error of the slope")
+    slope_se_per_decade: float | None = None
+    t_statistic: float | None = Field(None, description="slope / standard error, with n - 2 degrees of freedom")
+    p_value: float | None = Field(
+        None,
+        description="Two-sided OLS p-value for slope = 0 (assumes independent, normal residuals; "
+        "the Mann-Kendall test is the headline significance test)",
+    )
     status: str
     notes: list[str]
 
@@ -336,9 +359,11 @@ class IndicatorTrendOut(BaseModel):
 
 
 class TrendsOut(BaseModel):
-    heatwave_days: IndicatorTrendOut
+    event_days: IndicatorTrendOut
     event_count: IndicatorTrendOut
-    mean_tmax: IndicatorTrendOut
+    climate_indicator: IndicatorTrendOut = Field(
+        description="Annual mean daily maximum temperature (heatwave) or annual total precipitation (rain hazards)"
+    )
 
 
 class QualityBlock(BaseModel):
@@ -362,13 +387,13 @@ class QualityBlock(BaseModel):
 
 class OutlierDay(BaseModel):
     date: str
-    tmax_c: float
+    value: float = Field(description="Daily value in plausible_range_units")
     robust_z: float
 
 
 class FilledDay(BaseModel):
     date: str
-    tmax_c: float
+    value: float = Field(description="Interpolated value in plausible_range_units")
     reason: str = Field(description="Original flag of the filled day: missing_date, null or implausible")
 
 
@@ -377,7 +402,7 @@ class DataQualityOut(BaseModel):
     reference: QualityBlock | None
     min_year_completeness: float
     insufficient_years: list[int]
-    plausible_range_c: list[float] = Field(description="Plausible value range (in plausible_range_units)")
+    plausible_range: list[float] = Field(description="Plausible value range (in plausible_range_units)")
     plausible_range_units: str = "°C"
     gap_fill: str = Field("off", description="'off' or 'single-day linear'")
     outlier_method: str = ""
@@ -463,6 +488,10 @@ class HealthResponse(BaseModel):
     cache: dict
     data_source: dict
     limits: dict
+    prewarm: dict = Field(
+        default_factory=dict,
+        description="Background pre-warm of preset cities: status (disabled, pending, running, done, stopped), done, total",
+    )
 
 
 class ErrorBody(BaseModel):

@@ -88,7 +88,7 @@ def test_event_value_total_sums_heavy_days_only():
     records, _ = rain(date(2001, 1, 1), [10.0, 40.0, 50.0, 5.0] + [0.0] * 361)
     events = detect_events(records, 30.0, 1)
     annual = annual_indicators(records, events, 30.0, 2001, 2001, 0.9)
-    assert annual[0].heatwave_days == 2
+    assert annual[0].event_days == 2
     assert annual[0].event_value_total == pytest.approx(90.0)
     assert annual[0].total_value == pytest.approx(105.0)
 
@@ -105,22 +105,23 @@ def test_heavy_rainfall_analysis(client, mock_api):
     assert h["type"] == "heavy_rainfall" and h["units"] == "mm" and h["min_duration_days"] == 1
     assert h["percentile"] == 95 and "wet-day" in h["definition"]
     b = body["baseline"]
-    assert b["threshold_c"] is None and b["threshold_value"] > 1.0 and b["threshold_units"] == "mm"
+    assert "threshold_c" not in b and b["threshold_value"] > 1.0 and b["threshold_units"] == "mm"
     assert b["normal_annual_total_mm"] > 0
     s = body["summary"]
     assert s["peak_tmax_c"] is None and s["peak_daily_mm"] >= b["threshold_value"]
-    assert s["total_heatwave_days"] == sum(a["heatwave_days"] for a in body["annual"]) > 0
+    assert s["total_event_days"] == sum(a["event_days"] for a in body["annual"]) > 0
     for a in body["annual"]:
         assert a["mean_tmax_c"] is None and a["total_mm"] is not None
         assert 0 <= a["event_total_mm"] <= a["total_mm"]
-        if a["heatwave_days"]:
+        if a["event_days"]:
             assert a["max_daily_mm"] > b["threshold_value"]
     for e in body["events"]:
         assert e["peak_tmax_c"] is None and e["peak_value"] > b["threshold_value"]
-    assert body["trends"]["mean_tmax"]["indicator"] == "Annual total precipitation"
-    assert body["trends"]["mean_tmax"]["units"] == "mm/year"
-    assert body["trends"]["heatwave_days"]["indicator"] == "Annual heavy-rain days"
-    assert "heavy-rain event(s)" in body["insights"][0]
+    assert body["trends"]["climate_indicator"]["indicator"] == "Annual total precipitation"
+    assert body["trends"]["climate_indicator"]["units"] == "mm/year"
+    assert body["trends"]["event_days"]["indicator"] == "Annual heavy-rain days"
+    assert "heavy-rain events totalling" in body["insights"][0]
+    assert "any single heavy-rain day" in h["definition"] and "(s)" not in h["definition"]
     assert any("convective" in c for c in body["caveats"])
     assert "not applied to precipitation" in body["data_quality"]["outlier_method"]
     assert body["data_quality"]["plausible_range_units"] == "mm"
@@ -156,17 +157,17 @@ def test_hazards_do_not_share_cached_observations(client, mock_api):
     assert variables == ["temperature_2m_max", "precipitation_sum"]  # drought reuses the precipitation series
 
 
-def test_drought_ignores_percentile_in_cache_key(client, mock_api):
-    a = client.get("/api/analyze", params=q(hazard="drought", percentile=90)).json()
-    b = client.get("/api/analyze", params=q(hazard="drought", percentile=99)).json()
-    assert b["cache"]["analysis"] == "hit"
-    assert a["summary"] == b["summary"]
+def test_drought_rejects_percentile(client, mock_api):
+    r = client.get("/api/analyze", params=q(hazard="drought", percentile=90))
+    assert r.status_code == 422
+    assert "percentile does not apply to drought" in r.json()["error"]["message"]
+    assert client.get("/api/analyze", params=q(hazard="drought")).status_code == 200
 
 
 def test_custom_dry_spell_length(client, mock_api):
     short = client.get("/api/analyze", params=q(hazard="drought", min_duration_days=5)).json()
     long = client.get("/api/analyze", params=q(hazard="drought", min_duration_days=30)).json()
-    assert short["summary"]["total_heatwave_days"] >= long["summary"]["total_heatwave_days"]
+    assert short["summary"]["total_event_days"] >= long["summary"]["total_event_days"]
     assert "at least 30 consecutive" in long["hazard"]["definition"]
 
 
@@ -184,8 +185,14 @@ def test_precipitation_unit_mismatch_rejected(make_client, mock_api):
     assert "precipitation unit" in r.json()["error"]["message"]
 
 
-@pytest.mark.parametrize("hazard, column", [("heavy_rainfall", "Rain on heavy-rain event days (mm)"), ("drought", "Longest dry spell in year (CDD, days)")])
-def test_precipitation_exports(client, hazard, column):
+@pytest.mark.parametrize(
+    "hazard, column, slug",
+    [
+        ("heavy_rainfall", "Rain on heavy-rain event days (mm)", "heavy-rainfall"),
+        ("drought", "Longest dry spell in year (CDD, days)", "dry-spells"),
+    ],
+)
+def test_precipitation_exports(client, hazard, column, slug):
     body = client.get("/api/analyze", params=q(hazard=hazard)).json()
     text = client.get("/api/export.csv", params=q(hazard=hazard)).text
     rows = list(csv.reader(io.StringIO(text)))
@@ -196,10 +203,15 @@ def test_precipitation_exports(client, hazard, column):
     assert not any("temperature" in h.lower() for h in header)
     data = [r for r in rows[rows.index(header) + 1:] if r]
     total_col = header.index(body["hazard"]["labels"]["days"])
-    assert sum(int(r[total_col]) for r in data) == body["summary"]["total_heatwave_days"]
+    assert sum(int(r[total_col]) for r in data) == body["summary"]["total_event_days"]
 
     pdf = client.get("/api/export.pdf", params=q(hazard=hazard)).content
     pdf_text = " ".join(" ".join(p.extract_text() for p in PdfReader(io.BytesIO(pdf)).pages).split())
     assert f"{body['hazard']['name']} Trend Report" in pdf_text
     assert "Daily precipitation total (mm)" in pdf_text
     assert "Mean daily maximum" not in pdf_text
+    assert "(s)" not in pdf_text and "per year per year" not in pdf_text and "/year per" not in pdf_text
+    assert "α" not in pdf_text and "alpha" in pdf_text
+    assert f"climate-lens-hyderabad-{slug}-" in client.get(
+        "/api/export.pdf", params=q(hazard=hazard)
+    ).headers["content-disposition"]

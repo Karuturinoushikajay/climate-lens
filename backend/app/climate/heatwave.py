@@ -115,7 +115,7 @@ class HeatwaveEvent:
 class AnnualIndicator:
     year: int
     event_count: int
-    heatwave_days: int
+    event_days: int
     longest_event_days: int
     mean_tmax: float | None
     max_tmax: float | None
@@ -380,7 +380,7 @@ def annual_indicators(
             AnnualIndicator(
                 year=year,
                 event_count=event_counts.get(year, 0),
-                heatwave_days=days,
+                event_days=days,
                 longest_event_days=longest.get(year, 0),
                 mean_tmax=(sum(valid) / len(valid)) if valid else None,
                 max_tmax=max(valid) if valid else None,

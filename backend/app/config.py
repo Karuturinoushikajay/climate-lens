@@ -53,6 +53,11 @@ class Settings(BaseSettings):
 
     min_year_completeness: float = Field(0.8, ge=0, le=1)
 
+    # Background pre-warm of the preset cities' default analyses (MongoDB cache only).
+    prewarm_enabled: bool = True
+    prewarm_delay_seconds: float = Field(120.0, ge=0)
+    prewarm_start_delay_seconds: float = Field(30.0, ge=0)
+
     @property
     def cors_origins(self) -> list[str]:
         return [o.strip().rstrip("/") for o in self.allowed_origins.split(",") if o.strip()]

@@ -52,6 +52,7 @@ export interface HealthResponse {
     max_analysis_span_years: number
     max_box_span_degrees: number
   }
+  prewarm?: { status: string; done: number; total: number; detail?: string }
 }
 
 export interface Regression {
@@ -60,6 +61,10 @@ export interface Regression {
   slope_per_decade: number | null
   intercept: number | null
   r_squared: number | null
+  slope_se_per_year?: number | null
+  slope_se_per_decade?: number | null
+  t_statistic?: number | null
+  p_value?: number | null
   status: string
   notes: string[]
 }
@@ -109,7 +114,7 @@ export interface IndicatorTrend {
 export interface AnnualRow {
   year: number
   event_count: number
-  heatwave_days: number
+  event_days: number
   longest_event_days: number
   mean_tmax_c: number | null
   max_tmax_c: number | null
@@ -128,7 +133,7 @@ export interface AnnualRow {
   duplicate_dates?: number
   implausible_days?: number
   outlier_days?: number
-  heatwave_days_rolling_mean: number | null
+  event_days_rolling_mean: number | null
   event_count_rolling_mean: number | null
 }
 
@@ -165,13 +170,13 @@ export interface QualityBlock {
 
 export interface OutlierDay {
   date: string
-  tmax_c: number
+  value: number
   robust_z: number
 }
 
 export interface FilledDay {
   date: string
-  tmax_c: number
+  value: number
   reason: string
 }
 
@@ -212,9 +217,8 @@ export interface AnalysisResponse {
     mode: 'analysis_period' | 'fixed_reference'
     reference_start_year: number
     reference_end_year: number
-    threshold_c: number | null
-    threshold_value?: number | null
-    threshold_units?: string
+    threshold_value: number | null
+    threshold_units: string
     normal_annual_total_mm?: number | null
     percentile_method: string
     valid_days_used: number
@@ -235,9 +239,9 @@ export interface AnalysisResponse {
   cache: { backend: string; analysis: 'hit' | 'miss'; observations: 'hit' | 'miss' | 'partial' }
   summary: {
     total_events: number
-    total_heatwave_days: number
+    total_event_days: number
     mean_events_per_year: number
-    mean_heatwave_days_per_year: number
+    mean_event_days_per_year: number
     longest_event_days: number
     longest_event_start: string | null
     longest_event_end: string | null
@@ -251,13 +255,13 @@ export interface AnalysisResponse {
   }
   annual: AnnualRow[]
   events: HeatwaveEvent[]
-  trends: { heatwave_days: IndicatorTrend; event_count: IndicatorTrend; mean_tmax: IndicatorTrend }
+  trends: { event_days: IndicatorTrend; event_count: IndicatorTrend; climate_indicator: IndicatorTrend }
   data_quality: {
     analysis: QualityBlock
     reference: QualityBlock | null
     min_year_completeness: number
     insufficient_years: number[]
-    plausible_range_c: number[]
+    plausible_range: number[]
     plausible_range_units?: string
     gap_fill?: string
     outlier_method?: string

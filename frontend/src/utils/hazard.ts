@@ -28,6 +28,6 @@ export function hazardView(data: AnalysisResponse): HazardView {
     precip,
     units: h.units ?? '°C',
     labels: { ...HEATWAVE_LABELS, ...(h.labels ?? {}) },
-    threshold: data.baseline.threshold_value ?? data.baseline.threshold_c,
+    threshold: data.baseline.threshold_value ?? null,
   }
 }

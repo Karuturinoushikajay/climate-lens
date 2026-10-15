@@ -6,6 +6,7 @@ import { InfoTip } from './InfoTip'
 
 const TIPS = {
   slope: 'Ordinary least-squares slope of the annual values against year. Describes the observed record; it is not a forecast and does not by itself establish significance.',
+  olsP: 'Two-sided t-test of slope = 0 with n - 2 degrees of freedom; ± is one standard error. Assumes independent, normally distributed residuals, which annual climate series often violate, so the Mann-Kendall verdict remains the headline significance test.',
   r2: 'Share of year-to-year variance explained by the straight-line fit (0-1). Low values mean the series is noisy relative to the trend.',
   s: 'Mann-Kendall S: sum of signs of all later-minus-earlier pairs. Positive means later values tend to be larger.',
   z: 'Standardised S using the tie-corrected variance, inflated for serial correlation (Hamed-Rao), with a continuity correction.',
@@ -18,7 +19,13 @@ const TIPS = {
   sen: "Sen's slope: median of all pairwise slopes, a robust companion to Mann-Kendall.",
 }
 
-const INDICATORS = ['heatwave_days', 'event_count', 'mean_tmax'] as const
+const INDICATORS = ['event_days', 'event_count', 'climate_indicator'] as const
+
+function pLabel(p: number | null): string {
+  const s = fmtP(p)
+  if (s === 'undefined') return 'undefined'
+  return s.startsWith('<') ? `p ${s}` : `p = ${s}`
+}
 
 function Row({ label, tip, value }: { label: string; tip: string; value: string }) {
   return (
@@ -40,7 +47,14 @@ function Indicator({ t }: { t: IndicatorTrend }) {
       <div className="stats-block">
         <h4>Linear regression</h4>
         <dl>
-          <Row label="Slope" tip={TIPS.slope} value={`${fmtSigned(r.slope_per_decade, 3)} ${t.units.replace('/year', '')} per decade`} />
+          <Row
+            label="Slope"
+            tip={TIPS.slope}
+            value={`${fmtSigned(r.slope_per_decade, 3)}${r.slope_se_per_decade != null ? ` ± ${fmt(r.slope_se_per_decade, 3)}` : ''} ${t.units.replace('/year', '')} per decade`}
+          />
+          {r.p_value !== undefined && (
+            <Row label="Slope p-value (OLS)" tip={TIPS.olsP} value={pLabel(r.p_value)} />
+          )}
           <Row label="R²" tip={TIPS.r2} value={fmt(r.r_squared, 3)} />
           <Row label="Observations" tip={TIPS.n} value={String(r.n)} />
         </dl>
@@ -88,9 +102,9 @@ function Indicator({ t }: { t: IndicatorTrend }) {
 }
 
 export function StatsPanel({ data }: { data: AnalysisResponse }) {
-  const [active, setActive] = useState<(typeof INDICATORS)[number]>('heatwave_days')
+  const [active, setActive] = useState<(typeof INDICATORS)[number]>('event_days')
   const labels = hazardView(data).labels
-  const tabLabel = { heatwave_days: labels.days, event_count: 'Event count', mean_tmax: labels.third }
+  const tabLabel = { event_days: labels.days, event_count: 'Event count', climate_indicator: labels.third }
   return (
     <section className="panel" aria-label="Statistical analysis">
       <div className="panel-head">

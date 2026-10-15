@@ -33,8 +33,8 @@ function defaultAnalyze(url: URL): Promise<Response> {
     body.data_quality.analysis.interpolated_days = 3
     body.data_quality.filled_total = 3
     body.data_quality.filled_dates = [
-      { date: `${body.period.start_year}-05-10`, tmax_c: 41.2, reason: 'null' },
-      { date: `${body.period.start_year}-07-02`, tmax_c: 30.1, reason: 'missing_date' },
+      { date: `${body.period.start_year}-05-10`, value: 41.2, reason: 'null' },
+      { date: `${body.period.start_year}-07-02`, value: 30.1, reason: 'missing_date' },
     ]
     body.annual[0].interpolated_days = 3
     body.annual[0].missing_days = 3
@@ -125,10 +125,12 @@ describe('App', () => {
     expect(screen.getByText('Heatwave events')).toBeInTheDocument()
     expect(screen.getByTestId('metric-threshold')).toHaveTextContent('39.9 °C')
     expect(screen.getByText('95th pct threshold')).toBeInTheDocument()
-    expect(screen.getByText(/7 heatwave event\(s\) totalling 31 heatwave day\(s\)/)).toBeInTheDocument()
+    expect(screen.getByText(/7 heatwave events totalling 31 heatwave days/)).toBeInTheDocument()
     expect(screen.getByTestId('mk-verdict-Annual heatwave days')).toHaveTextContent(
       'Increasing monotonic trend detected, with the significance criterion met.',
     )
+    expect(screen.getByText(/± 8\.660 days per decade/)).toBeInTheDocument()
+    expect(screen.getByText('p = 0.3333')).toBeInTheDocument()
     const table = screen.getByRole('region', { name: 'Annual indicators table' })
     expect(within(table).getAllByRole('row')).toHaveLength(1 + 36)
     expect(lastAnalyze().get('latitude')).toBe('17.385')
@@ -376,15 +378,20 @@ describe('App', () => {
     expect(lastAnalyze().has('fill_gaps')).toBe(false)
     expect(screen.getByTestId('result-hazard')).toHaveTextContent('95th percentile · 3+ days')
 
-    await user.selectOptions(screen.getByLabelText('Threshold percentile'), '90')
+    const pct = screen.getByLabelText('Threshold percentile')
+    await user.clear(pct)
+    await user.type(pct, '100')
+    expect(screen.getByText('Percentile must be from 90 to 99.9, with at most one decimal place.')).toBeInTheDocument()
+    await user.clear(pct)
+    await user.type(pct, '93.3')
     const days = screen.getByLabelText('Minimum consecutive days')
     await user.clear(days)
     await user.type(days, '2')
     await user.click(screen.getByRole('button', { name: /run analysis/i }))
-    await waitFor(() => expect(lastAnalyze().get('percentile')).toBe('90'))
+    await waitFor(() => expect(lastAnalyze().get('percentile')).toBe('93.3'))
     expect(lastAnalyze().get('min_duration_days')).toBe('2')
-    await waitFor(() => expect(screen.getByTestId('result-hazard')).toHaveTextContent('90th percentile · 2+ days'))
-    expect(screen.getByText('90th pct threshold')).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByTestId('result-hazard')).toHaveTextContent('93.3th percentile · 2+ days'))
+    expect(screen.getByText('93.3th pct threshold')).toBeInTheDocument()
   })
 
   it('rejects minimum days outside 2-10', async () => {
@@ -502,10 +509,10 @@ describe('App', () => {
     expect(screen.getByRole('button', { name: /run analysis/i })).toBeDisabled()
   })
 
-  it('offers heatwave, heavy rainfall and drought', async () => {
+  it('offers heatwave, heavy rainfall and dry spells', async () => {
     await renderLoaded()
     expect(screen.getByLabelText('Hazard type')).toHaveValue('heatwave')
-    for (const name of [/heatwave/i, /heavy rainfall/i, /drought/i])
+    for (const name of [/heatwave/i, /heavy rainfall/i, /^dry spells$/i])
       expect(screen.getByRole('option', { name })).toBeEnabled()
   })
 
@@ -537,7 +544,7 @@ describe('App', () => {
     expect(screen.getByTestId('limitations')).toHaveTextContent('different rainfall amounts')
   })
 
-  it('runs a drought analysis with dry-spell settings and percent of normal', async () => {
+  it('runs a dry-spell analysis with dry-spell settings and percent of normal', async () => {
     const user = await renderLoaded()
     await user.selectOptions(screen.getByLabelText('Hazard type'), 'drought')
     expect(screen.queryByLabelText('Threshold percentile')).not.toBeInTheDocument()
@@ -553,7 +560,7 @@ describe('App', () => {
     await waitFor(() => expect(lastAnalyze().get('hazard')).toBe('drought'))
     expect(lastAnalyze().get('min_duration_days')).toBe('20')
     expect(lastAnalyze().has('percentile')).toBe(false)
-    await waitFor(() => expect(screen.getByTestId('result-hazard')).toHaveTextContent('Drought (dry spells): dry days below 1 mm'))
+    await waitFor(() => expect(screen.getByTestId('result-hazard')).toHaveTextContent('Dry spells: dry days below 1 mm'))
     expect(screen.getByTestId('metric-threshold')).toHaveTextContent('< 1 mm')
     const table = screen.getByRole('region', { name: 'Annual indicators table' })
     expect(within(table).getByRole('columnheader', { name: '% of normal' })).toBeInTheDocument()

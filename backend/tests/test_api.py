@@ -49,15 +49,22 @@ def test_analyze_valid_point(client, mock_api):
     assert body["region"]["kind"] == "point"
     assert body["period"]["years"] == 31
     assert len(body["annual"]) == 31
-    assert body["baseline"]["threshold_c"] is not None
+    assert body["baseline"]["threshold_value"] is not None
     assert body["hazard"]["min_duration_days"] == 3
     s = body["summary"]
     assert s["total_events"] == len(body["events"]) == sum(a["event_count"] for a in body["annual"])
-    assert s["total_heatwave_days"] == sum(a["heatwave_days"] for a in body["annual"])
-    assert s["total_heatwave_days"] == sum(e["duration_days"] for e in body["events"])
+    assert s["total_event_days"] == sum(a["event_days"] for a in body["annual"])
+    assert s["total_event_days"] == sum(e["duration_days"] for e in body["events"])
     assert all(e["duration_days"] >= 3 for e in body["events"])
-    mk = body["trends"]["heatwave_days"]["mann_kendall"]
+    mk = body["trends"]["event_days"]["mann_kendall"]
     assert mk["n"] == 31 and mk["alpha"] == 0.05
+    assert set(body["trends"]) == {"event_days", "event_count", "climate_indicator"}
+    assert body["trends"]["climate_indicator"]["units"] == "°C"
+    assert body["baseline"]["threshold_units"] == "°C" and "threshold_c" not in body["baseline"]
+    assert {"total_heatwave_days", "mean_heatwave_days_per_year"}.isdisjoint(s)
+    assert {"heatwave_days", "heatwave_days_rolling_mean"}.isdisjoint(body["annual"][0])
+    assert "event_days_rolling_mean" in body["annual"][0]
+    assert body["data_quality"]["plausible_range"] and "plausible_range_c" not in body["data_quality"]
     assert body["cache"] == {"backend": "memory", "analysis": "miss", "observations": "miss"}
     assert body["insights"] and body["caveats"]
     assert mock_api.calls.call_count == 1
@@ -107,7 +114,7 @@ def test_fill_gaps_is_opt_in_flagged_and_keyed(make_client, mock_api):
     y2000 = next(a for a in on["annual"] if a["year"] == 2000)
     assert y2000["interpolated_days"] == 1 and y2000["missing_days"] == 1
     assert on["request"]["fill_gaps"] is True
-    assert on["baseline"]["threshold_c"] == off["baseline"]["threshold_c"]
+    assert on["baseline"]["threshold_value"] == off["baseline"]["threshold_value"]
     assert any("gap fill is on" in c for c in on["caveats"])
 
 
@@ -119,6 +126,7 @@ def test_filled_days_are_visible_in_events_and_lists(make_client, mock_api):
     dq = on["data_quality"]
     assert dq["filled_total"] == 1
     assert dq["filled_dates"][0]["date"] == "2000-06-05" and dq["filled_dates"][0]["reason"] == "null"
+    assert isinstance(dq["filled_dates"][0]["value"], float) and "tmax_c" not in dq["filled_dates"][0]
     assert all("filled_days" in e for e in on["events"])
     assert sum(e["filled_days"] for e in on["events"]) <= 1
     rows, meta = _parse_csv(client.get("/api/export.csv", params=q(start_year=2000, end_year=2005, fill_gaps="true")).text)
@@ -141,6 +149,7 @@ def test_quality_reports_outliers_and_method(client, mock_api):
     assert dq["outlier_total"] == dq["analysis"]["outlier_days"]
     assert len(dq["outlier_dates"]) == min(dq["outlier_total"], 20)
     assert all(abs(o["robust_z"]) > 4 for o in dq["outlier_dates"])
+    assert all(set(o) == {"date", "value", "robust_z"} for o in dq["outlier_dates"])
 
 
 def test_configurable_percentile_and_duration(client, mock_api):
@@ -149,10 +158,10 @@ def test_configurable_percentile_and_duration(client, mock_api):
     p99 = client.get("/api/analyze", params={**base, "percentile": 99, "min_duration_days": 5}).json()
     assert p90["hazard"]["percentile"] == 90 and p90["hazard"]["min_duration_days"] == 2
     assert p99["hazard"]["percentile"] == 99 and p99["hazard"]["min_duration_days"] == 5
-    assert p90["baseline"]["threshold_c"] < p99["baseline"]["threshold_c"]
+    assert p90["baseline"]["threshold_value"] < p99["baseline"]["threshold_value"]
     assert all(e["duration_days"] >= 2 for e in p90["events"])
     assert all(e["duration_days"] >= 5 for e in p99["events"])
-    assert p90["summary"]["total_heatwave_days"] > p99["summary"]["total_heatwave_days"]
+    assert p90["summary"]["total_event_days"] > p99["summary"]["total_event_days"]
     assert "90th-percentile" in p90["hazard"]["definition"] and "At least 2" in p90["hazard"]["definition"]
     assert p99["cache"]["analysis"] == "miss"
 
@@ -175,8 +184,11 @@ def test_configurable_percentile_and_duration(client, mock_api):
         (q(south=10, west=70, north=12, east=72), "not both"),
         (q(baseline="fixed_reference", reference_start_year=2000, reference_end_year=2003), "at least 10 years"),
         (q(label="x" * 300), "label"),
-        (q(percentile=96), "percentile must be one of 90, 92.5, 95, 97.5, 99"),
+        (q(percentile=89.9), "percentile must be between 90 and 99.9"),
+        (q(percentile=100), "percentile must be between 90 and 99.9"),
+        (q(percentile=95.55), "at most one decimal place"),
         (q(percentile="abc"), "percentile"),
+        (q(hazard="drought", percentile=95), "percentile does not apply to drought"),
         (q(min_duration_days=1), "min_duration_days"),
         (q(min_duration_days=11), "min_duration_days"),
         (
@@ -192,6 +204,50 @@ def test_validation_errors(client, mock_api, params, fragment):
     assert err["code"] == "validation_error"
     assert fragment.lower() in (err["message"] + str(err.get("details"))).lower()
     assert mock_api.calls.call_count == 0
+
+
+@pytest.mark.parametrize("pct", [90, 93.3, 99.9])
+def test_any_percentile_from_90_to_99_9(client, mock_api, pct):
+    r = client.get("/api/analyze", params=q(start_year=2000, end_year=2005, percentile=pct))
+    assert r.status_code == 200, r.text
+    assert r.json()["hazard"]["percentile"] == pct
+    assert f"{pct:g}th-percentile" in r.json()["hazard"]["definition"]
+
+
+@pytest.mark.parametrize(
+    "lat, lon",
+    [(19.076, 72.8777), (13.0827, 80.2707), (9.9312, 76.2673), (11.6234, 92.7265)],
+    ids=["Mumbai", "Chennai", "Kochi", "Port Blair"],
+)
+def test_coastal_points_accepted(client, mock_api, lat, lon):
+    r = client.get("/api/analyze", params=q(latitude=lat, longitude=lon, start_year=2000, end_year=2005))
+    assert r.status_code == 200, r.text
+
+
+@pytest.mark.parametrize("lat, lon", [(15, 65), (0, -150)], ids=["Arabian Sea", "mid-Pacific"])
+def test_open_ocean_points_rejected(client, mock_api, lat, lon):
+    for path in ("/api/analyze", "/api/export.csv", "/api/export.pdf"):
+        r = client.get(path, params=q(latitude=lat, longitude=lon))
+        assert r.status_code == 422
+        assert "open ocean" in r.json()["error"]["message"]
+    assert mock_api.calls.call_count == 0
+
+
+def test_all_ocean_box_rejected_but_coastal_box_accepted(client, mock_api):
+    sea = {"south": 10, "west": 62, "north": 14, "east": 66, "start_year": 2000, "end_year": 2005}
+    r = client.get("/api/analyze", params=sea)
+    assert r.status_code == 422 and "entirely open ocean" in r.json()["error"]["message"]
+    assert mock_api.calls.call_count == 0
+    coast = {"south": 17, "west": 68, "north": 20, "east": 73, "start_year": 2000, "end_year": 2005}
+    assert client.get("/api/analyze", params=coast).status_code == 200
+
+
+def test_land_mask_lookup():
+    from app.services.land import box_has_land, near_land
+
+    assert near_land(17.385, 78.4867) and near_land(10.5667, 72.6417)
+    assert not near_land(15, 88) and not near_land(-40, -120)
+    assert box_has_land(15.8, 77.2, 19.9, 81.3) and not box_has_land(-45, -125, -40, -120)
 
 
 def test_box_validation(client):
@@ -219,7 +275,7 @@ def test_fixed_reference_baseline(client, mock_api):
     ).json()
     assert b["baseline"]["mode"] == "fixed_reference"
     assert b["baseline"]["reference_start_year"] == 1991
-    assert b["baseline"]["threshold_c"] != a["baseline"]["threshold_c"]
+    assert b["baseline"]["threshold_value"] != a["baseline"]["threshold_value"]
     assert b["data_quality"]["reference"] is not None
     # reference inside the analysis window -> union equals the cached range, no extra request
     assert mock_api.calls.call_count == 1
@@ -467,10 +523,11 @@ def test_csv_export(client):
     r = client.get("/api/export.csv", params=q(start_year=2000, end_year=2010))
     assert r.status_code == 200
     assert r.headers["content-type"].startswith("text/csv")
-    assert r.headers["content-disposition"] == 'attachment; filename="climate-lens-hyderabad-2000-2010.csv"'
+    assert r.headers["content-disposition"] == 'attachment; filename="climate-lens-hyderabad-heatwave-2000-2010.csv"'
     rows, meta = _parse_csv(r.text)
     assert [int(x["Year"]) for x in rows] == list(range(2000, 2011))
     assert any("Hyderabad" in m for m in meta)
+    assert "#,Hazard,Heatwave" in meta
     assert {"Heatwave days", "Heatwave events (counted in start year)", "Unusable days (missing + implausible)"} <= set(rows[0])
     assert "Days received from source" in rows[0]
     assert any(m.startswith('#,Accounting check,"OK: ') for m in meta)
@@ -497,7 +554,7 @@ def test_exports_follow_configured_hazard(make_client, mock_api):
     pdf = c.get("/api/export.pdf", params=params).content
     text = " ".join(" ".join(p.extract_text() for p in PdfReader(io.BytesIO(pdf)).pages).split())
     assert "90th-percentile threshold" in text
-    assert "Minimum consecutive hot days 2" in text
+    assert "Minimum run length (hot days) 2" in text
     assert "Interpolated days (gap fill) 1" in text
     assert "Annual data quality" in text
     assert "at least 2 consecutive hot days" in text
@@ -512,7 +569,7 @@ def test_csv_formula_injection_is_neutralised(client):
     assert r.status_code == 200
     region_line = next(l for l in r.text.lstrip("\ufeff").splitlines() if l.startswith("#,Region,"))
     assert "'=HYPERLINK" in region_line
-    assert "climate-lens-hyperlink-http-x-2000-2005.csv" in r.headers["content-disposition"]
+    assert "climate-lens-hyperlink-http-x-heatwave-2000-2005.csv" in r.headers["content-disposition"]
 
 
 def test_pdf_export(client):
@@ -548,15 +605,20 @@ def test_dashboard_csv_pdf_agree(client, mock_api):
     assert mock_api.calls.call_count == 1
     for annual, row in zip(data["annual"], rows):
         assert int(row["Year"]) == annual["year"]
-        assert int(row["Heatwave days"]) == annual["heatwave_days"]
+        assert int(row["Heatwave days"]) == annual["event_days"]
         assert int(row["Heatwave events (counted in start year)"]) == annual["event_count"]
         assert int(row["Longest event contribution (days)"]) == annual["longest_event_days"]
         assert int(row["Valid observation days"]) == annual["valid_days"]
 
-    assert f"{data['baseline']['threshold_c']:.2f} °C" in text
+    assert f"{data['baseline']['threshold_value']:.2f} °C" in text
     assert f"Total heatwave events {data['summary']['total_events']}" in text
-    assert f"Total heatwave days {data['summary']['total_heatwave_days']}" in text
-    mk = data["trends"]["heatwave_days"]["mann_kendall"]
+    assert f"Total heatwave days {data['summary']['total_event_days']}" in text
+    mk = data["trends"]["event_days"]["mann_kendall"]
     assert f"S statistic {mk['s']}" in text
     if mk["z"] is not None:
         assert f"{mk['z']:.4f}" in text
+    reg = data["trends"]["event_days"]["regression"]
+    if reg["p_value"] is not None:
+        p = reg["p_value"]
+        assert f"Two-sided OLS p-value {'< 0.0001' if p < 1e-4 else f'{p:.4f}'}" in text
+        assert f"Slope standard error {reg['slope_se_per_year']:.4f}" in text

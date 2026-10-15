@@ -18,8 +18,8 @@ PLAUSIBLE_PRECIP_RANGE_MM = (0.0, 2000.0)
 
 @dataclass(frozen=True)
 class InsightWords:
-    event_noun: str  # "heatwave event(s)"
-    day_noun: str  # "heatwave day(s)"
+    event_noun: str  # singular, e.g. "heatwave event"; pluralised with "s"
+    day_noun: str  # singular, e.g. "heatwave day"
     days_phrase: str  # "annual heatwave days"
     third_phrase: str  # "Annual mean daily maximum temperature"
     third_units: str
@@ -62,7 +62,7 @@ HAZARDS: dict[str, HazardSpec] = {
             "third_long": "Annual mean daily maximum temperature",
         },
         words=InsightWords(
-            "heatwave event(s)", "heatwave day(s)", "annual heatwave days",
+            "heatwave event", "heatwave day", "annual heatwave days",
             "Annual mean daily maximum temperature", "°C", 2,
         ),
     ),
@@ -86,13 +86,13 @@ HAZARDS: dict[str, HazardSpec] = {
             "third_long": "Annual total precipitation",
         },
         words=InsightWords(
-            "heavy-rain event(s)", "heavy-rain day(s)", "annual heavy-rain days",
+            "heavy-rain event", "heavy-rain day", "annual heavy-rain days",
             "Annual total precipitation", "mm", 0,
         ),
     ),
     "drought": HazardSpec(
         key="drought",
-        name="Drought (dry spells)",
+        name="Dry spells",
         variable="precipitation_sum",
         units="mm",
         plausible_range=PLAUSIBLE_PRECIP_RANGE_MM,
@@ -110,7 +110,7 @@ HAZARDS: dict[str, HazardSpec] = {
             "third_long": "Annual total precipitation",
         },
         words=InsightWords(
-            "dry spell(s)", "dry-spell day(s)", "annual dry-spell days",
+            "dry spell", "dry-spell day", "annual dry-spell days",
             "Annual total precipitation", "mm", 0,
         ),
     ),

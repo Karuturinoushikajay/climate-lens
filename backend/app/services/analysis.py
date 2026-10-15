@@ -96,6 +96,24 @@ def sample_points(q: AnalysisQuery) -> list[tuple[float, float]]:
     return points
 
 
+def _observation_key(points: list[tuple[float, float]], start: date, end: date, variable: str) -> str:
+    return make_key(
+        "obs",
+        {"schema": OBSERVATION_SCHEMA, "points": points, "start": start, "end": end, "variable": variable, "model": MODEL},
+    )
+
+
+def _observation_ranges(q: AnalysisQuery) -> list[tuple[date, date]]:
+    """Date ranges to fetch: the analysis window, merged with the reference period when they overlap or touch."""
+    a_start, a_end = q.start_year, q.end_year
+    if q.baseline != "fixed_reference":
+        return [(date(a_start, 1, 1), date(a_end, 12, 31))]
+    r_start, r_end = q.reference_start_year, q.reference_end_year
+    if r_start <= a_end + 1 and a_start <= r_end + 1:
+        return [(date(min(a_start, r_start), 1, 1), date(max(a_end, r_end), 12, 31))]
+    return [(date(a_start, 1, 1), date(a_end, 12, 31)), (date(r_start, 1, 1), date(r_end, 12, 31))]
+
+
 def _quality_block(q: DataQuality) -> QualityBlock:
     return QualityBlock(
         expected_days=q.expected_days,
@@ -132,6 +150,10 @@ def _regression_out(r: RegressionResult) -> RegressionOut:
         slope_per_decade=r.slope * 10 if r.slope is not None else None,
         intercept=r.intercept,
         r_squared=r.r_squared,
+        slope_se_per_year=r.slope_se,
+        slope_se_per_decade=r.slope_se * 10 if r.slope_se is not None else None,
+        t_statistic=r.t_statistic,
+        p_value=r.p_value,
         status=r.status,
         notes=r.notes,
     )
@@ -203,15 +225,24 @@ class AnalysisService:
         )
         return response
 
+    def analysis_cached(self, q: AnalysisQuery) -> bool:
+        cached = self.cache.get("analyses", make_key("analysis", self._analysis_key_params(q, sample_points(q))))
+        return cached is not None and cached.get("algorithm_version") == ALGORITHM_VERSION
+
+    def observations_cached(self, q: AnalysisQuery) -> bool:
+        points = sample_points(q)
+        variable = HAZARDS[q.hazard].variable
+        return all(
+            self.cache.get("observations", _observation_key(points, start, end, variable)) is not None
+            for start, end in _observation_ranges(q)
+        )
+
     # ------------------------------------------------------------ observations
 
     def _observations(
         self, points: list[tuple[float, float]], start: date, end: date, variable: str = VARIABLE
     ) -> tuple[WeatherSeries, bool]:
-        key = make_key(
-            "obs",
-            {"schema": OBSERVATION_SCHEMA, "points": points, "start": start, "end": end, "variable": variable, "model": MODEL},
-        )
+        key = _observation_key(points, start, end, variable)
         doc = self.cache.get("observations", key)
         if doc is not None:
             try:
@@ -225,19 +256,13 @@ class AnalysisService:
     def _fetch_ranges(
         self, points: list[tuple[float, float]], q: AnalysisQuery, variable: str = VARIABLE
     ) -> tuple[WeatherSeries, WeatherSeries | None, str]:
-        a_start, a_end = q.start_year, q.end_year
-        if q.baseline != "fixed_reference":
-            series, hit = self._observations(points, date(a_start, 1, 1), date(a_end, 12, 31), variable)
-            return series, None, "hit" if hit else "miss"
+        ranges = _observation_ranges(q)
+        if len(ranges) == 1:
+            series, hit = self._observations(points, *ranges[0], variable)
+            return series, series if q.baseline == "fixed_reference" else None, "hit" if hit else "miss"
 
-        r_start, r_end = q.reference_start_year, q.reference_end_year
-        if r_start <= a_end + 1 and a_start <= r_end + 1:  # overlapping or adjacent -> one request
-            lo, hi = min(a_start, r_start), max(a_end, r_end)
-            series, hit = self._observations(points, date(lo, 1, 1), date(hi, 12, 31), variable)
-            return series, series, "hit" if hit else "miss"
-
-        a_series, a_hit = self._observations(points, date(a_start, 1, 1), date(a_end, 12, 31), variable)
-        r_series, r_hit = self._observations(points, date(r_start, 1, 1), date(r_end, 12, 31), variable)
+        a_series, a_hit = self._observations(points, *ranges[0], variable)
+        r_series, r_hit = self._observations(points, *ranges[1], variable)
         status = "hit" if a_hit and r_hit else "miss" if not (a_hit or r_hit) else "partial"
         return a_series, r_series, status
 
@@ -319,20 +344,20 @@ class AnalysisService:
         trends, raw_trends = self._trends(annual, spec)
         summary = self._summary(records, events, annual, precip)
         if threshold is not None:
-            days_reg, days_mk, days_change = raw_trends["heatwave_days"]
+            days_reg, days_mk, days_change = raw_trends["event_days"]
             insights = build_insights(
                 label,
                 q.start_year,
                 q.end_year,
                 summary.total_events,
-                summary.total_heatwave_days,
+                summary.total_event_days,
                 days_change,
                 days_reg,
                 days_mk,
                 raw_trends["event_count"][1],
                 summary.excluded_years,
-                tmax_change=raw_trends["mean_tmax"][2],
-                tmax_mk=raw_trends["mean_tmax"][1],
+                tmax_change=raw_trends["climate_indicator"][2],
+                tmax_mk=raw_trends["climate_indicator"][1],
                 words=spec.words,
             )
             if spec.key == "drought" and normal is not None:
@@ -371,7 +396,6 @@ class AnalysisService:
                 mode=q.baseline,
                 reference_start_year=base_years[0],
                 reference_end_year=base_years[1],
-                threshold_c=round(threshold, 4) if threshold is not None and not precip else None,
                 threshold_value=round(threshold, 4) if threshold is not None else None,
                 threshold_units=units,
                 normal_annual_total_mm=round(normal, 2) if normal is not None else None,
@@ -421,17 +445,17 @@ class AnalysisService:
                 reference=_quality_block(ref_quality) if ref_quality else None,
                 min_year_completeness=self.settings.min_year_completeness,
                 insufficient_years=[a.year for a in annual if not a.sufficient_data],
-                plausible_range_c=list(spec.plausible_range),
+                plausible_range=list(spec.plausible_range),
                 plausible_range_units=units,
                 gap_fill="single-day linear" if q.fill_gaps else "off",
                 outlier_method=OUTLIER_METHOD if spec.flags_outliers else PRECIP_OUTLIER_NOTE,
                 outlier_dates=[
-                    OutlierDay(date=r.day.isoformat(), tmax_c=round(r.tmax, 2), robust_z=r.outlier_z)  # type: ignore[arg-type]
+                    OutlierDay(date=r.day.isoformat(), value=round(r.tmax, 2), robust_z=r.outlier_z)  # type: ignore[arg-type]
                     for r in outliers
                 ],
                 outlier_total=quality.outlier_days,
                 filled_dates=[
-                    FilledDay(date=r.day.isoformat(), tmax_c=round(r.tmax, 2), reason=r.filled_from or "")  # type: ignore[arg-type]
+                    FilledDay(date=r.day.isoformat(), value=round(r.tmax, 2), reason=r.filled_from or "")  # type: ignore[arg-type]
                     for r in filled[:MAX_FILLED_DATES]
                 ],
                 filled_total=len(filled),
@@ -483,7 +507,7 @@ class AnalysisService:
                 sampled_points=[list(p) for p in points],
                 note=(
                     f"Each daily value ({'precipitation' if HAZARDS[q.hazard].variable == PRECIP_VARIABLE else 'maximum temperature'}) "
-                    f"is the mean of {len(points)} sampled grid point(s) inside the box. "
+                    f"is the mean of {len(points)} sampled grid {'point' if len(points) == 1 else 'points'} inside the box. "
                     "This is a coarse spatial sample, not an area-weighted or administrative-boundary average."
                 ),
             )
@@ -510,9 +534,9 @@ class AnalysisService:
         totals = [a.total_value for a in used if a.total_value is not None]
         return SummaryOut(
             total_events=total_events,
-            total_heatwave_days=total_days,
+            total_event_days=total_days,
             mean_events_per_year=round(total_events / years, 4) if years else 0.0,
-            mean_heatwave_days_per_year=round(total_days / years, 4) if years else 0.0,
+            mean_event_days_per_year=round(total_days / years, 4) if years else 0.0,
             longest_event_days=longest.duration_days if longest else 0,
             longest_event_start=longest.start.isoformat() if longest else None,
             longest_event_end=longest.end.isoformat() if longest else None,
@@ -527,7 +551,7 @@ class AnalysisService:
 
     @staticmethod
     def _annual_out(annual: list[AnnualIndicator], precip: bool = False, normal: float | None = None) -> list[AnnualOut]:
-        days = [a.heatwave_days if a.sufficient_data else None for a in annual]
+        days = [a.event_days if a.sufficient_data else None for a in annual]
         counts = [a.event_count if a.sufficient_data else None for a in annual]
         days_rm = rolling_mean(days, ROLLING_WINDOW_YEARS)
         counts_rm = rolling_mean(counts, ROLLING_WINDOW_YEARS)
@@ -544,7 +568,7 @@ class AnalysisService:
             AnnualOut(
                 year=a.year,
                 event_count=a.event_count,
-                heatwave_days=a.heatwave_days,
+                event_days=a.event_days,
                 longest_event_days=a.longest_event_days,
                 mean_tmax_c=None if precip else r2(a.mean_tmax),
                 max_tmax_c=None if precip else r2(a.max_tmax),
@@ -563,7 +587,7 @@ class AnalysisService:
                 duplicate_dates=a.duplicate_dates,
                 implausible_days=a.implausible_days,
                 outlier_days=a.outlier_days,
-                heatwave_days_rolling_mean=round(dr, 3) if dr is not None else None,
+                event_days_rolling_mean=round(dr, 3) if dr is not None else None,
                 event_count_rolling_mean=round(cr, 3) if cr is not None else None,
             )
             for a, dr, cr in zip(annual, days_rm, counts_rm)
@@ -593,10 +617,10 @@ class AnalysisService:
         labels = spec.labels
         third = [a.mean_tmax for a in used] if spec.key == "heatwave" else [a.total_value for a in used]
         trends = TrendsOut(
-            heatwave_days=indicator("heatwave_days", f"Annual {labels['days'].lower()}", "days/year", [a.heatwave_days for a in used]),
+            event_days=indicator("event_days", f"Annual {labels['days'].lower()}", "days/year", [a.event_days for a in used]),
             event_count=indicator("event_count", f"Annual {labels['events'].lower()}", "events/year", [a.event_count for a in used]),
-            mean_tmax=indicator(
-                "mean_tmax", labels["third_long"], spec.units if spec.key == "heatwave" else "mm/year", third
+            climate_indicator=indicator(
+                "climate_indicator", labels["third_long"], spec.units if spec.key == "heatwave" else "mm/year", third
             ),
         )
         return trends, raw
@@ -605,10 +629,10 @@ class AnalysisService:
     def _definition(q: AnalysisQuery, spec: HazardSpec) -> str:
         n = q.min_duration_days
         if spec.key == "heavy_rainfall":
+            run = "any single heavy-rain day (or a run of them)" if n == 1 else f"a run of at least {n} consecutive heavy-rain days"
             return (
                 f"Heavy-rain day: daily precipitation strictly greater than the {q.percentile:g}th percentile of "
-                f"wet-day (>= {WET_DAY_MM:g} mm) precipitation in the baseline. An event is a run of at least {n} "
-                "consecutive heavy-rain day(s)."
+                f"wet-day (>= {WET_DAY_MM:g} mm) precipitation in the baseline. An event is {run}."
             )
         if spec.key == "drought":
             return (

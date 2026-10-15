@@ -65,7 +65,7 @@ export function YearTable({ data }: { data: AnalysisResponse }) {
               <tr key={a.year} className={a.sufficient_data ? '' : 'insufficient'}>
                 <th scope="row">{a.year}</th>
                 <td>{a.event_count}</td>
-                <td>{a.heatwave_days}</td>
+                <td>{a.event_days}</td>
                 <td>{a.longest_event_days}</td>
                 {values.map((c) => (
                   <td key={c.header}>{c.cell(a)}</td>

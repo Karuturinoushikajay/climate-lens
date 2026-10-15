@@ -65,12 +65,12 @@ function ChartFrame({ title, subtitle, children }: { title: string; subtitle: st
 }
 
 export function HeatwaveDaysChart({ data }: { data: AnalysisResponse }) {
-  const trend = data.trends.heatwave_days
+  const trend = data.trends.event_days
   const h = hazardView(data)
   const rows = data.annual.map((a) => ({
     year: a.year,
-    days: a.heatwave_days,
-    rolling: a.heatwave_days_rolling_mean,
+    days: a.event_days,
+    rolling: a.event_days_rolling_mean,
     fit: fitted(trend, a.year, a.sufficient_data),
   }))
   return (
@@ -187,7 +187,7 @@ function fmtNum(v: number | null, digits = 1): string {
 
 export function TemperatureChart({ data }: { data: AnalysisResponse }) {
   if (hazardView(data).precip) return <PrecipitationChart data={data} />
-  const threshold = data.baseline.threshold_c
+  const threshold = data.baseline.threshold_value ?? null
   const rows = data.annual.map((a) => ({ year: a.year, mean: a.mean_tmax_c, max: a.max_tmax_c, threshold }))
   return (
     <ChartFrame

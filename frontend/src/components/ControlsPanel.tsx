@@ -5,7 +5,9 @@ import {
   HAZARD_OPTIONS,
   MAX_LABEL_LENGTH,
   MIN_YEAR,
-  PERCENTILE_OPTIONS,
+  PERCENTILE_MAX,
+  PERCENTILE_MIN,
+  PERCENTILE_PRESETS,
   describeLocation,
   hazardOption,
   sameLocation,
@@ -20,9 +22,9 @@ import { InfoTip } from './InfoTip'
 
 const PERCENTILE_TIPS: Record<string, string> = {
   heatwave:
-    'A hot day is warmer than this percentile of daily maximum temperatures for the location. Higher percentiles find rarer, more extreme heat.',
+    'A hot day is warmer than this percentile of daily maximum temperatures for the location. Higher percentiles find rarer, more extreme heat. Any value from 90 to 99.9 is accepted.',
   heavy_rainfall:
-    'A heavy-rain day has more rain than this percentile of wet days (at least 1 mm) in the baseline, as in the ETCCDI R95p index. Higher percentiles find rarer downpours.',
+    'A heavy-rain day has more rain than this percentile of wet days (at least 1 mm) in the baseline, as in the ETCCDI R95p index. Higher percentiles find rarer downpours. Any value from 90 to 99.9 is accepted.',
 }
 
 const COORD_DEBOUNCE_MS = 500
@@ -213,17 +215,22 @@ export function ControlsPanel({
             <span>
               Threshold percentile <InfoTip text={PERCENTILE_TIPS[hazard.id] ?? PERCENTILE_TIPS.heatwave} />
             </span>
-            <select
-              value={selection.percentile}
+            <input
+              type="number"
+              inputMode="decimal"
+              min={PERCENTILE_MIN}
+              max={PERCENTILE_MAX}
+              step={0.1}
+              list="percentile-presets"
+              value={Number.isNaN(selection.percentile) ? '' : selection.percentile}
               aria-label="Threshold percentile"
-              onChange={(e) => onChange({ percentile: Number(e.target.value) })}
-            >
-              {PERCENTILE_OPTIONS.map((p) => (
-                <option key={p} value={p}>
-                  {p}th
-                </option>
+              onChange={(e) => onChange({ percentile: e.target.value === '' ? NaN : Number(e.target.value) })}
+            />
+            <datalist id="percentile-presets">
+              {PERCENTILE_PRESETS.map((p) => (
+                <option key={p} value={p} />
               ))}
-            </select>
+            </datalist>
           </label>
         ) : (
           <div className="field" data-testid="dry-day-rule">
@@ -274,7 +281,7 @@ export function ControlsPanel({
       <fieldset className="field baseline">
         <legend>
           {hazard.usesPercentile ? 'Percentile baseline' : 'Precipitation normal baseline'}{' '}
-          <InfoTip text="The threshold (or, for drought, the precipitation normal) can come from the analysis period itself or from a fixed reference period (e.g. 1991-2020). Results from different baselines are not directly comparable." />
+          <InfoTip text="The threshold (or, for dry spells, the precipitation normal) can come from the analysis period itself or from a fixed reference period (e.g. 1991-2020). Results from different baselines are not directly comparable." />
         </legend>
         {(['fixed_reference', 'analysis_period'] as BaselineMode[]).map((mode) => (
           <label key={mode} className="radio">

@@ -66,7 +66,11 @@ describe('validateSelection', () => {
   })
 
   it('validates percentile and minimum days', () => {
-    expect(validateSelection(sel({ percentile: 96 }), 2025)).toContain('Percentile must be one of 90, 92.5, 95, 97.5, 99.')
+    for (const p of [89.9, 100, 95.55, NaN])
+      expect(validateSelection(sel({ percentile: p }), 2025)).toContain(
+        'Percentile must be from 90 to 99.9, with at most one decimal place.',
+      )
+    for (const p of [90, 93.3, 99.9]) expect(validateSelection(sel({ percentile: p }), 2025)).toEqual([])
     for (const d of [1, 11, 2.5, NaN])
       expect(validateSelection(sel({ minDurationDays: d }), 2025)).toContain(
         'Minimum consecutive days must be a whole number from 2 to 10.',

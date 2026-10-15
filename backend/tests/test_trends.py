@@ -13,6 +13,39 @@ def test_regression_perfect_line():
     assert r.n == 4
 
 
+def test_regression_slope_standard_error_and_p_value():
+    # Hand-checked: slope 27/35, SSE 0.6/0.7, SE = sqrt(SSE / 4 / 17.5), t = sqrt(R^2 * 4 / (1 - R^2)).
+    r = linear_regression([1, 2, 3, 4, 5, 6], [2, 4, 5, 4, 5, 7])
+    assert r.slope == pytest.approx(27 / 35)
+    assert r.r_squared == pytest.approx(27 / 35)
+    assert r.slope_se == pytest.approx(0.2099562637, rel=1e-8)
+    assert r.t_statistic == pytest.approx(13.5**0.5, rel=1e-9)
+    assert r.p_value == pytest.approx(0.0213116411, rel=1e-6)
+
+
+@pytest.mark.parametrize(
+    "t, df, p",
+    [
+        (2.228138852, 10, 0.05),  # tabulated 97.5% quantiles
+        (12.70620474, 1, 0.05),
+        (2.042272456, 30, 0.05),
+        (1.0, 1, 0.5),  # Cauchy: 1 - 2 atan(t) / pi
+        (1.0, 2, 1 - 1 / 3**0.5),  # df = 2: 1 - t / sqrt(2 + t^2)
+        (0.0, 5, 1.0),
+    ],
+)
+def test_t_two_sided_p_matches_closed_forms(t, df, p):
+    from app.climate.trends import t_two_sided_p
+
+    assert t_two_sided_p(t, df) == pytest.approx(p, abs=1e-8)
+    assert t_two_sided_p(-t, df) == pytest.approx(p, abs=1e-8)
+
+
+def test_regression_no_slope_p_value_for_constant_series():
+    r = linear_regression([2000, 2001, 2002], [5, 5, 5])
+    assert r.slope_se == 0 and r.p_value is None and r.t_statistic is None
+
+
 def test_regression_insufficient_points():
     r = linear_regression([2000, 2001], [1, 2])
     assert r.status == "insufficient_data" and r.slope is None
@@ -81,10 +114,21 @@ def test_insights_are_derived_from_values():
         excluded_years=[2003],
     )
     text = " ".join(insights)
-    assert "5 heatwave event(s)" in text and "20 heatwave day(s)" in text
+    assert "5 heatwave events totalling 20 heatwave days were detected" in text
     assert "%" not in insights[1]  # zero baseline -> no percentage
     assert "not a forecast" in text
-    assert "1 year(s)" in text
+    assert "1 year with insufficient data coverage was excluded" in text
+    assert "(s)" not in text
+
+
+def test_insights_use_singular_for_one():
+    years = list(range(2000, 2010))
+    insights = build_insights(
+        "Test", 2000, 2009, total_events=1, total_days=1,
+        days_change=period_change(years, [0] * 10), days_regression=linear_regression(years, [0] * 10),
+        days_mk=mann_kendall([0] * 10), events_mk=mann_kendall([0] * 10), excluded_years=[],
+    )
+    assert insights[0].startswith("Test: 1 heatwave event totalling 1 heatwave day was detected")
 
 
 def _insights(days: list[float], tmax: list[float] | None = None) -> list[str]:
