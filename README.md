@@ -20,7 +20,28 @@ The backend is on Render's free tier, which sleeps after 15 idle minutes; a cold
 > - **Not yet verified:** the Docker Compose stack. Docker Desktop's Linux engine could not start on the development machine because WSL has no distributions installed. The Compose file validates with `docker compose config`, but the containers were not built or run.
 > - **Deployed and verified live (12 October 2026):** frontend on Vercel, backend on Render, cache on MongoDB Atlas (free M0). Live checks passed for CORS from the Vercel origin, a Hyderabad 1990-2025 analysis, the CSV download, and the PDF download. `/api/health` reports `"mode": "mongodb"`, and a repeated Delhi 2000-2024 analysis went from a cache miss (3.9 s) to a MongoDB cache hit (1.1 s).
 > - **Re-verified live (15 October 2026), algorithm version 2026.10.5:** all three hazards through the deployed UI and API (Hyderabad heatwave, Mumbai heavy rainfall, Jaipur dry spells, and a Telangana box), with CSV and PDF downloads, CORS from the Vercel origin, `422` for invalid hazard settings, and a 375 px mobile layout without horizontal overflow.
+> - **Re-verified live (15 October 2026), algorithm version 2026.10.6:** Hyderabad heatwave and Mumbai heavy rainfall were served as MongoDB cache hits filled by the pre-warmer, and `/api/health` reported the pre-warm progress. Responses use the new field names and include the slope standard error and OLS p-value. The Jaipur dry-spells CSV and PDF download as `climate-lens-jaipur-dry-spells-1990-2025.*`. The API returned `422` for an open-ocean point, an all-ocean box, a percentile on dry spells, and a percentile with two decimals. The screenshots below come from this check, with a 390 px mobile layout without horizontal overflow.
 > - **Continuous integration:** GitHub Actions runs both test suites, the linter and the production build on every push to `main`.
+
+### Screenshots
+
+Captured from the live site on 15 October 2026 (algorithm version 2026.10.6) with real ERA5 data; nothing is mocked.
+
+**Hyderabad heatwave, 1990-2025:** summary cards, data quality report and annual charts.
+
+![Hyderabad heatwave dashboard](docs/screenshots/heatwave-dashboard.png)
+
+**Trend statistics for the same run:** the OLS slope with its standard error and p-value next to the Mann-Kendall test, and the annual temperature chart with the threshold line.
+
+![Trend interpretation and statistical analysis](docs/screenshots/trends-and-stats.png)
+
+**Mumbai heavy rainfall, 1990-2025.**
+
+![Mumbai heavy rainfall dashboard](docs/screenshots/mumbai-heavy-rainfall.png)
+
+**Jaipur dry spells at a 390 px mobile width.**
+
+<img src="docs/screenshots/jaipur-dry-spells-mobile.png" alt="Jaipur dry spells on a mobile screen" width="320">
 
 ---
 
@@ -28,6 +49,7 @@ The backend is on Render's free tier, which sleeps after 15 idle minutes; a cold
 
 The seven numbered sections follow the order the brief asks for.
 
+- [Screenshots](#screenshots)
 - [Features](#features)
 - [1. Setup](#1-setup)
   - [Docker](#docker-mongodb--backend--frontend) · [Local development](#local-development-without-docker) · [Configuration](#configuration) · [Tests](#tests) · [Deployment](#deployment)
@@ -305,7 +327,7 @@ The dashboard JSON, the CSV, and the PDF all come from one `AnalysisService.anal
 ├── frontend/
 │   ├── src/                        # App, components/, api/, hooks/, state/, utils/, test/
 │   ├── Dockerfile, nginx.conf, vercel.json
-├── docs/                           # architecture.md, requirements-traceability.md
+├── docs/                           # architecture.md, requirements-traceability.md, screenshots/
 ├── docker-compose.yml, render.yaml, .env.example
 ```
 
